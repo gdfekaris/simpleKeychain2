@@ -3,6 +3,10 @@ name = "simpleKeychain2"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["export"]
+export = []
+
 [dependencies]
 arboard = "3"
 argon2 = "0.5"

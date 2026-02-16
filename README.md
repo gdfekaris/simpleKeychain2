@@ -85,6 +85,91 @@ Re-encrypts all stored credentials under the new password. The vault remains int
 
 All commands require your master password.
 
+## Creating Backups
+
+sk2 can export all your credentials into a GPG-encrypted CSV file. The plaintext is never written to disk — it is piped directly from sk2 to GPG in memory.
+
+Requires [GPG](https://gnupg.org/) to be installed and in your `PATH`.
+
+### Basic export
+
+```bash
+sk2 export
+```
+
+This creates `sk2-export.csv.gpg` in your current directory. GPG will prompt you to set a passphrase for the export file.
+
+To choose a different output path:
+
+```bash
+sk2 export -o /mnt/usb/backup.csv.gpg
+```
+
+### Decrypting the backup
+
+No sk2 needed — just GPG:
+
+```bash
+gpg -d sk2-export.csv.gpg > credentials.csv
+```
+
+The CSV has three columns: `name`, `username`, `password`. This format can be imported into most other password managers.
+
+### Extra precautions
+
+If you want to be thorough about minimizing exposure:
+
+- **Decrypt to a RAM-backed filesystem.** Decrypting to RAM avoids writing plaintext to a physical disk where it could be recovered after deletion.
+
+  Linux/macOS (`/tmp` is often a tmpfs):
+  ```bash
+  gpg -d sk2-export.csv.gpg > /tmp/credentials.csv
+  # use the file, then:
+  shred -u /tmp/credentials.csv
+  ```
+  Windows (requires a RAM disk tool like [ImDisk](https://sourceforge.net/projects/imdisk-toolkit/)):
+  ```powershell
+  gpg -d sk2-export.csv.gpg > R:\credentials.csv
+  # use the file, then delete it — or simply unmount the RAM disk
+  ```
+
+- **Securely delete the decrypted file.** Regular deletion only removes the directory entry — the data remains on disk until overwritten.
+
+  Linux/macOS:
+  ```bash
+  shred -u credentials.csv
+  ```
+  Windows (built-in `cipher /w` wipes free space in a directory after you delete the file):
+  ```powershell
+  del credentials.csv
+  cipher /w:C:\path\to\directory
+  ```
+  Note: secure deletion is ineffective on copy-on-write filesystems (ZFS, Btrfs) and SSDs with wear leveling, which is why decrypting to a RAM-backed filesystem is the safer option.
+
+- **Export directly to removable media.** Write the `.gpg` file to a USB drive, then physically disconnect it:
+  ```bash
+  sk2 export -o /mnt/usb/sk2-export.csv.gpg        # Linux/macOS
+  sk2 export -o E:\sk2-export.csv.gpg               # Windows
+  ```
+- **Verify the backup.** After exporting, confirm you can decrypt it before relying on it:
+  ```bash
+  gpg -d sk2-export.csv.gpg | head -2               # Linux/macOS
+  ```
+  ```powershell
+  gpg -d sk2-export.csv.gpg | Select-Object -First 2   # Windows (PowerShell)
+  ```
+- **Use a different passphrase.** GPG will prompt you to choose a passphrase for the export file. Don't reuse your vault master password — if someone obtains both the vault file and the export file, one password shouldn't unlock both.
+
+### Disabling export
+
+The export feature is included by default. If you don't want the export command in your binary at all (e.g., to eliminate bulk credential extraction as an attack surface), compile without it:
+
+```bash
+cargo build --release --no-default-features
+```
+
+This removes the `export` subcommand entirely — it won't appear in `--help` and the code is excluded from the binary.
+
 ## Security
 
 - **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
