@@ -1,16 +1,48 @@
 use argon2::{Argon2, Algorithm, Version, Params};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
+use clap::{Parser, Subcommand};
 use rand::RngCore;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
+use std::process;
 
 const DB_PATH: &str = "vault.db";
 const TIME_COST: u32 = 3;
 const MEMORY_COST: u32 = 64 * 1024; // 64 MiB
 const PARALLELISM: u32 = 4;
 const KEY_LEN: usize = 32;
+
+#[derive(Parser)]
+#[command(name = "sk2", about = "A local-only CLI password manager")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Initialize a new vault (set master password)
+    Init,
+    /// Add or update a credential for a service
+    Add {
+        /// The service name (e.g. "github", "gmail")
+        service: String,
+    },
+    /// Retrieve a credential by service name
+    Get {
+        /// The service name to look up
+        service: String,
+    },
+    /// Delete a credential by service name
+    Delete {
+        /// The service name to delete
+        service: String,
+    },
+    /// List all stored service names
+    List,
+}
 
 #[derive(Serialize, Deserialize)]
 struct Credential {
@@ -93,17 +125,15 @@ fn encrypt(key: &[u8; KEY_LEN], username: &str, password: &str) -> (Vec<u8>, Vec
     (nonce_bytes.to_vec(), ciphertext)
 }
 
-fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> (String, String) {
+fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<(String, String), ()> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = XNonce::from_slice(nonce);
 
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
-        .expect("Decryption failed — wrong master password?");
+    let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| ())?;
 
     let cred: Credential =
-        serde_json::from_slice(&plaintext).expect("Failed to deserialize credential");
-    (cred.username, cred.password)
+        serde_json::from_slice(&plaintext).map_err(|_| ())?;
+    Ok((cred.username, cred.password))
 }
 
 // --- Credential storage ---
@@ -118,7 +148,7 @@ fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, usernam
     .expect("Failed to store credential");
 }
 
-fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<(String, String)> {
+fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<Result<(String, String), ()>> {
     let result = conn.query_row(
         "SELECT nonce, ciphertext FROM credentials WHERE service = ?1",
         rusqlite::params![service],
@@ -136,6 +166,27 @@ fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Opti
     }
 }
 
+fn delete_credential(conn: &Connection, service: &str) -> bool {
+    let rows = conn
+        .execute(
+            "DELETE FROM credentials WHERE service = ?1",
+            rusqlite::params![service],
+        )
+        .expect("Failed to delete credential");
+    rows > 0
+}
+
+fn list_services(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("SELECT service FROM credentials ORDER BY service")
+        .expect("Failed to prepare query");
+
+    stmt.query_map([], |row| row.get(0))
+        .expect("Failed to query credentials")
+        .map(|r| r.expect("Failed to read row"))
+        .collect()
+}
+
 // --- Helpers ---
 
 fn prompt(msg: &str) -> String {
@@ -146,53 +197,135 @@ fn prompt(msg: &str) -> String {
     input.trim().to_string()
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+fn vault_exists(conn: &Connection) -> bool {
+    !is_first_run(conn)
+}
+
+fn require_vault(conn: &Connection) {
+    if !vault_exists(conn) {
+        eprintln!("Vault not initialized. Run 'init' first.");
+        process::exit(1);
+    }
+}
+
+fn read_master_password() -> String {
+    let password = rpassword::read_password_from_tty(Some("Master password: "))
+        .expect("Failed to read password");
+
+    if password.is_empty() {
+        eprintln!("Password cannot be empty.");
+        process::exit(1);
+    }
+
+    password
+}
+
+fn init_vault(conn: &Connection) {
+    if vault_exists(conn) {
+        eprintln!("Vault already initialized.");
+        process::exit(1);
+    }
+
+    let password = rpassword::read_password_from_tty(Some("Set master password: "))
+        .expect("Failed to read password");
+
+    if password.is_empty() {
+        eprintln!("Password cannot be empty.");
+        process::exit(1);
+    }
+
+    let confirm = rpassword::read_password_from_tty(Some("Confirm master password: "))
+        .expect("Failed to read password");
+
+    if password != confirm {
+        eprintln!("Passwords do not match.");
+        process::exit(1);
+    }
+
+    let mut salt = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt);
+    store_salt(conn, &salt);
+
+    println!("Vault initialized.");
+}
+
+fn unlock_vault(conn: &Connection) -> [u8; KEY_LEN] {
+    require_vault(conn);
+    let master_password = read_master_password();
+    let salt = load_salt(conn);
+    derive_key(&master_password, &salt)
 }
 
 // --- Main ---
 
 fn main() {
+    let cli = Cli::parse();
+
     let conn = Connection::open(DB_PATH).expect("Failed to open database");
     init_db(&conn);
 
-    let master_password = rpassword::read_password_from_tty(Some("Enter master password: "))
-        .expect("Failed to read password");
-
-    if master_password.is_empty() {
-        eprintln!("Password cannot be empty.");
-        std::process::exit(1);
-    }
-
-    let salt = if is_first_run(&conn) {
-        println!("First run — initializing vault.");
-        let mut salt = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut salt);
-        store_salt(&conn, &salt);
-        salt.to_vec()
-    } else {
-        load_salt(&conn)
-    };
-
-    let key = derive_key(&master_password, &salt);
-    println!("Derived key: {}", hex(&key));
-
-    // --- Demo: add a credential and read it back ---
-    let service = prompt("Service name: ");
-    let username = prompt("Username: ");
-    let password = rpassword::read_password_from_tty(Some("Password: "))
-        .expect("Failed to read password");
-
-    add_credential(&conn, &key, &service, &username, &password);
-    println!("Credential stored for '{service}'.");
-
-    // Read it back to verify round-trip
-    match get_credential(&conn, &key, &service) {
-        Some((u, p)) => {
-            println!("Round-trip verification for '{service}':");
-            println!("  Username: {u}");
-            println!("  Password: {p}");
+    match cli.command {
+        Command::Init => {
+            init_vault(&conn);
         }
-        None => eprintln!("Failed to retrieve credential!"),
+
+        Command::Add { service } => {
+            let key = unlock_vault(&conn);
+            let username = prompt("Username: ");
+            let password = rpassword::read_password_from_tty(Some("Password: "))
+                .expect("Failed to read password");
+
+            if password.is_empty() {
+                eprintln!("Password cannot be empty.");
+                process::exit(1);
+            }
+
+            add_credential(&conn, &key, &service, &username, &password);
+            println!("Credential stored for '{service}'.");
+        }
+
+        Command::Get { service } => {
+            let key = unlock_vault(&conn);
+            match get_credential(&conn, &key, &service) {
+                Some(Ok((username, password))) => {
+                    println!("Service:  {service}");
+                    println!("Username: {username}");
+                    println!("Password: {password}");
+                }
+                Some(Err(())) => {
+                    eprintln!("Decryption failed — wrong master password?");
+                    process::exit(1);
+                }
+                None => {
+                    eprintln!("No credential found for '{service}'.");
+                    process::exit(1);
+                }
+            }
+        }
+
+        Command::Delete { service } => {
+            let key = unlock_vault(&conn);
+            let _ = key; // key not needed for delete, but validates master password
+            if delete_credential(&conn, &service) {
+                println!("Credential for '{service}' deleted.");
+            } else {
+                eprintln!("No credential found for '{service}'.");
+                process::exit(1);
+            }
+        }
+
+        Command::List => {
+            let key = unlock_vault(&conn);
+            let _ = key; // key not needed for list, but validates master password
+            let services = list_services(&conn);
+            if services.is_empty() {
+                println!("No credentials stored.");
+            } else {
+                println!("Stored credentials:");
+                for s in &services {
+                    println!("  {s}");
+                }
+            }
+        }
     }
 }
