@@ -1,7 +1,7 @@
 use argon2::{Argon2, Algorithm, Version, Params};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -23,6 +23,15 @@ pub(crate) fn derive_key(master_password: &str, salt: &[u8]) -> Zeroizing<[u8; K
         .hash_password_into(master_password.as_bytes(), salt, &mut *key)
         .expect("Key derivation failed");
     key
+}
+
+pub(crate) fn generate_password(length: usize) -> Zeroizing<String> {
+    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?";
+    let mut rng = rand::thread_rng();
+    let password: String = (0..length)
+        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
+        .collect();
+    Zeroizing::new(password)
 }
 
 pub(crate) fn encrypt_raw(key: &[u8; KEY_LEN], plaintext: &[u8]) -> (Vec<u8>, Vec<u8>) {

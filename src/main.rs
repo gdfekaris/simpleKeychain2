@@ -42,6 +42,12 @@ enum Command {
     Add {
         /// The service name (e.g. "github", "gmail")
         service: String,
+        /// Generate a random password instead of prompting for one
+        #[arg(short, long)]
+        generate: bool,
+        /// Length of the generated password (default: 16, range: 4–64)
+        #[arg(short, long, default_value_t = 16)]
+        length: usize,
     },
     /// Retrieve a credential by service name
     Get {
@@ -81,17 +87,28 @@ fn run(cli: Cli) -> Result<(), String> {
             vault::init_vault(&conn)?;
         }
 
-        Command::Add { service } => {
+        Command::Add { service, generate, length } => {
             let key = vault::unlock_vault(&conn)?;
             let username = vault::prompt("Username: ");
-            let password = Zeroizing::new(
-                rpassword::read_password_from_tty(Some("Password: "))
-                    .expect("Failed to read password"),
-            );
 
-            if password.is_empty() {
-                return Err("Password cannot be empty.".into());
-            }
+            let password = if generate {
+                if !(4..=64).contains(&length) {
+                    return Err("Password length must be between 4 and 64.".into());
+                }
+                crypto::generate_password(length)
+            } else {
+                if length != 16 {
+                    return Err("--length requires --generate.".into());
+                }
+                let p = Zeroizing::new(
+                    rpassword::read_password_from_tty(Some("Password: "))
+                        .expect("Failed to read password"),
+                );
+                if p.is_empty() {
+                    return Err("Password cannot be empty.".into());
+                }
+                p
+            };
 
             db::add_credential(&conn, &key, &service, &username, &password);
             println!("Credential stored for '{service}'.");

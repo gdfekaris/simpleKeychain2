@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**Version 0.2.0**
+**Version 0.2.1**
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -55,7 +55,21 @@ You'll be asked to enter and confirm your master password.
 sk2 add github
 ```
 
-Prompts for username and password. If the service already exists, it will be overwritten.
+Prompts for username and password (you must provide your own password). If the service already exists, it will be overwritten.
+
+To generate a random password instead:
+
+```bash
+sk2 add github --generate
+```
+
+This creates a 16-character random password (letters, digits, and symbols) using a cryptographically secure random number generator (ChaCha12 CSPRNG seeded from the OS entropy source via `getrandom`). The generated password is never printed to the terminal — use `sk2 get github` to copy it to your clipboard.
+
+To specify a custom length (4–64):
+
+```bash
+sk2 add github --generate --length 24
+```
 
 ### Retrieve a credential
 
