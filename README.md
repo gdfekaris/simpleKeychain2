@@ -1,5 +1,7 @@
 # simpleKeychain2 (sk2)
 
+**Version 0.2.0**
+
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
 ## How It Works
