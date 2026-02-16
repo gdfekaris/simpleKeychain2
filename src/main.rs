@@ -8,6 +8,8 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::process;
+use std::thread;
+use std::time::Duration;
 
 const DB_PATH: &str = "vault.db";
 const TIME_COST: u32 = 3;
@@ -353,6 +355,9 @@ fn main() {
                     println!("Service:  {service}");
                     println!("Username: {username}");
                     println!("Password copied to clipboard.");
+                    // Brief pause so the clipboard manager can grab the contents
+                    // before the process exits (needed on Linux/Wayland).
+                    thread::sleep(Duration::from_millis(100));
                 }
                 None => {
                     eprintln!("No credential found for '{service}'.");
