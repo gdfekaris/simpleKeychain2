@@ -10,6 +10,7 @@ use std::io::{self, Write};
 use std::process;
 use std::thread;
 use std::time::Duration;
+use zeroize::Zeroizing;
 
 const DB_PATH: &str = "vault.db";
 const TIME_COST: u32 = 3;
@@ -17,12 +18,17 @@ const MEMORY_COST: u32 = 64 * 1024; // 64 MiB
 const PARALLELISM: u32 = 4;
 const KEY_LEN: usize = 32;
 const VERIFY_PLAINTEXT: &[u8] = b"sk2-vault-ok";
+const CLIPBOARD_CLEAR_SECONDS: u64 = 10;
 
 #[derive(Parser)]
 #[command(name = "sk2", about = "A local-only CLI password manager")]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
+
+    /// Internal: clear clipboard after N seconds (used by spawned child)
+    #[arg(long = "clear-clipboard", hide = true)]
+    clear_clipboard: Option<u64>,
 }
 
 #[derive(Subcommand)]
@@ -114,14 +120,14 @@ fn load_verify_token(conn: &Connection) -> (Vec<u8>, Vec<u8>) {
 
 // --- Key derivation ---
 
-fn derive_key(master_password: &str, salt: &[u8]) -> [u8; KEY_LEN] {
+fn derive_key(master_password: &str, salt: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
     let params = Params::new(MEMORY_COST, TIME_COST, PARALLELISM, Some(KEY_LEN))
         .expect("Invalid Argon2 params");
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut key = [0u8; KEY_LEN];
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
     argon2
-        .hash_password_into(master_password.as_bytes(), salt, &mut key)
+        .hash_password_into(master_password.as_bytes(), salt, &mut *key)
         .expect("Key derivation failed");
     key
 }
@@ -254,9 +260,22 @@ fn require_vault(conn: &Connection) {
     }
 }
 
-fn read_master_password() -> String {
-    let password = rpassword::read_password_from_tty(Some("Master password: "))
-        .expect("Failed to read password");
+fn restrict_db_permissions(path: &str) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        if let Err(e) = std::fs::set_permissions(path, perms) {
+            eprintln!("Warning: could not set database permissions: {e}");
+        }
+    }
+}
+
+fn read_master_password() -> Zeroizing<String> {
+    let password = Zeroizing::new(
+        rpassword::read_password_from_tty(Some("Master password: "))
+            .expect("Failed to read password"),
+    );
 
     if password.is_empty() {
         eprintln!("Password cannot be empty.");
@@ -272,16 +291,20 @@ fn init_vault(conn: &Connection) {
         process::exit(1);
     }
 
-    let password = rpassword::read_password_from_tty(Some("Set master password: "))
-        .expect("Failed to read password");
+    let password = Zeroizing::new(
+        rpassword::read_password_from_tty(Some("Set master password: "))
+            .expect("Failed to read password"),
+    );
 
     if password.is_empty() {
         eprintln!("Password cannot be empty.");
         process::exit(1);
     }
 
-    let confirm = rpassword::read_password_from_tty(Some("Confirm master password: "))
-        .expect("Failed to read password");
+    let confirm = Zeroizing::new(
+        rpassword::read_password_from_tty(Some("Confirm master password: "))
+            .expect("Failed to read password"),
+    );
 
     if password != confirm {
         eprintln!("Passwords do not match.");
@@ -298,7 +321,7 @@ fn init_vault(conn: &Connection) {
     println!("Vault initialized.");
 }
 
-fn unlock_vault(conn: &Connection) -> [u8; KEY_LEN] {
+fn unlock_vault(conn: &Connection) -> Zeroizing<[u8; KEY_LEN]> {
     require_vault(conn);
     let master_password = read_master_password();
     let salt = load_salt(conn);
@@ -317,10 +340,25 @@ fn unlock_vault(conn: &Connection) -> [u8; KEY_LEN] {
 fn main() {
     let cli = Cli::parse();
 
+    // Hidden mode: clear clipboard after a delay, then exit.
+    if let Some(seconds) = cli.clear_clipboard {
+        thread::sleep(Duration::from_secs(seconds));
+        if let Ok(mut clipboard) = Clipboard::new() {
+            let _ = clipboard.set_text("");
+        }
+        return;
+    }
+
+    let command = cli.command.unwrap_or_else(|| {
+        eprintln!("No command provided. Run with --help for usage.");
+        process::exit(1);
+    });
+
     let conn = Connection::open(DB_PATH).expect("Failed to open database");
+    restrict_db_permissions(DB_PATH);
     init_db(&conn);
 
-    match cli.command {
+    match command {
         Command::Init => {
             init_vault(&conn);
         }
@@ -328,8 +366,10 @@ fn main() {
         Command::Add { service } => {
             let key = unlock_vault(&conn);
             let username = prompt("Username: ");
-            let password = rpassword::read_password_from_tty(Some("Password: "))
-                .expect("Failed to read password");
+            let password = Zeroizing::new(
+                rpassword::read_password_from_tty(Some("Password: "))
+                    .expect("Failed to read password"),
+            );
 
             if password.is_empty() {
                 eprintln!("Password cannot be empty.");
@@ -344,17 +384,38 @@ fn main() {
             let key = unlock_vault(&conn);
             match get_credential(&conn, &key, &service) {
                 Some((username, password)) => {
+                    let password = Zeroizing::new(password);
                     let mut clipboard = Clipboard::new().unwrap_or_else(|e| {
                         eprintln!("Failed to access clipboard: {e}");
                         process::exit(1);
                     });
-                    clipboard.set_text(&password).unwrap_or_else(|e| {
+                    clipboard.set_text(&*password).unwrap_or_else(|e| {
                         eprintln!("Failed to copy to clipboard: {e}");
                         process::exit(1);
                     });
+
+                    // Spawn a detached child process to clear the clipboard after the timeout.
+                    match std::env::current_exe() {
+                        Ok(exe) => {
+                            let result = process::Command::new(exe)
+                                .arg("--clear-clipboard")
+                                .arg(CLIPBOARD_CLEAR_SECONDS.to_string())
+                                .stdin(process::Stdio::null())
+                                .stdout(process::Stdio::null())
+                                .stderr(process::Stdio::null())
+                                .spawn();
+                            if let Err(e) = result {
+                                eprintln!("Warning: could not spawn clipboard-clear process: {e}");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: could not determine executable path: {e}");
+                        }
+                    }
+
                     println!("Service:  {service}");
                     println!("Username: {username}");
-                    println!("Password copied to clipboard.");
+                    println!("Password copied to clipboard (will be cleared in {CLIPBOARD_CLEAR_SECONDS}s).");
                     // Brief pause so the clipboard manager can grab the contents
                     // before the process exits (needed on Linux/Wayland).
                     thread::sleep(Duration::from_millis(100));

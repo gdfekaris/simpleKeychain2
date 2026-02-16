@@ -60,7 +60,7 @@ Prompts for username and password. If the service already exists, it will be ove
 sk2 get github
 ```
 
-Prints the service name and username. The password is copied to your clipboard.
+Prints the service name and username. The password is copied to your clipboard and automatically cleared after 10 seconds.
 
 ### Delete a credential
 
@@ -75,6 +75,13 @@ sk2 list
 ```
 
 All commands require your master password.
+
+## Security
+
+- **Encryption** — Credentials are encrypted with XChaCha20-Poly1305. The encryption key is derived from your master password using Argon2id (3 iterations, 64 MiB).
+- **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory as soon as they're no longer needed.
+- **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
+- **File permissions** — On Linux/macOS, `vault.db` is set to `0600` (owner read/write only) on every run.
 
 ## Platform Support
 
