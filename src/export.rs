@@ -5,6 +5,7 @@ use zeroize::Zeroizing;
 
 use crate::constants::*;
 use crate::db;
+use crate::ui;
 use crate::vault;
 
 fn csv_escape(field: &str) -> String {
@@ -17,7 +18,7 @@ fn restrict_file_permissions(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o600);
         if let Err(e) = std::fs::set_permissions(path, perms) {
-            eprintln!("Warning: could not set file permissions: {e}");
+            ui::warning(&format!("Could not set file permissions: {e}"));
         }
     }
 }
@@ -36,14 +37,16 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
 
     let services = db::list_services(conn);
     if services.is_empty() {
-        println!("No credentials to export.");
+        ui::muted("No credentials to export.");
         return Ok(());
     }
 
     // Pre-export warning
-    println!("WARNING: This will export ALL stored credentials into a GPG-encrypted file.");
-    println!("The file can be decrypted with: gpg -d {output}");
-    println!("Anyone with the export passphrase can read your passwords.");
+    ui::warning_block(&[
+        "This will export ALL stored credentials into a GPG-encrypted file.",
+        &format!("The file can be decrypted with: gpg -d {output}"),
+        "Anyone with the export passphrase can read your passwords.",
+    ]);
     println!();
     let answer = vault::prompt("Type 'yes' to continue: ");
     if answer != "yes" {
@@ -64,7 +67,7 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
                 csv.push('\n');
             }
             None => {
-                eprintln!("Warning: could not decrypt credential for '{service}', skipping.");
+                ui::warning(&format!("Could not decrypt credential for '{service}', skipping."));
             }
         }
     }
@@ -98,11 +101,11 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
 
     let count = services.len();
     println!();
-    println!("Exported {count} credential(s) to: {output}");
-    println!("Permissions set to owner-read/write only (0600).");
+    ui::success(&format!("Exported {count} credential(s) to: {output}"));
+    ui::muted("Permissions set to owner-read/write only (0600).");
     println!();
-    println!("To decrypt: gpg -d {output}");
-    println!("REMINDER: Delete this file once you no longer need it.");
+    ui::info("To decrypt", &format!("gpg -d {output}"));
+    ui::reminder("REMINDER: Delete this file once you no longer need it.");
 
     Ok(())
 }

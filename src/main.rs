@@ -3,10 +3,21 @@ mod crypto;
 mod db;
 #[cfg(feature = "export")]
 mod export;
+mod ui;
 mod vault;
 
 use arboard::Clipboard;
-use clap::{Parser, Subcommand};
+use clap::builder::styling::{AnsiColor, Styles};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Yellow.on_default().bold())
+    .usage(AnsiColor::Yellow.on_default().bold())
+    .literal(AnsiColor::Yellow.on_default().bold())
+    .placeholder(AnsiColor::White.on_default())
+    .valid(AnsiColor::Green.on_default().bold())
+    .invalid(AnsiColor::Red.on_default().bold())
+    .error(AnsiColor::Red.on_default().bold());
 use rusqlite::Connection;
 use std::process;
 use std::thread;
@@ -24,7 +35,7 @@ fn vault_path() -> std::path::PathBuf {
 }
 
 #[derive(Parser)]
-#[command(name = "sk2", about = "A local-only CLI password manager")]
+#[command(name = "sk2", about = "A local-only CLI password manager", styles = STYLES)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -100,8 +111,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 if length != 16 {
                     return Err("--length requires --generate.".into());
                 }
+                ui::service_password_prompt("Password: ");
                 let p = Zeroizing::new(
-                    rpassword::read_password_from_tty(Some("Password: "))
+                    rpassword::read_password_from_tty(None)
                         .expect("Failed to read password"),
                 );
                 if p.is_empty() {
@@ -111,7 +123,7 @@ fn run(cli: Cli) -> Result<(), String> {
             };
 
             db::add_credential(&conn, &key, &service, &username, &password);
-            println!("Credential stored for '{service}'.");
+            ui::success(&format!("Credential stored for '{service}'."));
         }
 
         Command::Get { service } => {
@@ -135,17 +147,17 @@ fn run(cli: Cli) -> Result<(), String> {
                                 .stderr(process::Stdio::null())
                                 .spawn();
                             if let Err(e) = result {
-                                eprintln!("Warning: could not spawn clipboard-clear process: {e}");
+                                ui::warning(&format!("Could not spawn clipboard-clear process: {e}"));
                             }
                         }
                         Err(e) => {
-                            eprintln!("Warning: could not determine executable path: {e}");
+                            ui::warning(&format!("Could not determine executable path: {e}"));
                         }
                     }
 
-                    println!("Service:  {service}");
-                    println!("Username: {username}");
-                    println!("Password copied to clipboard (will be cleared in {CLIPBOARD_CLEAR_SECONDS}s).");
+                    ui::info("Service ", &service);
+                    ui::info("Username", &username);
+                    ui::success(&format!("Password copied to clipboard (will be cleared in {CLIPBOARD_CLEAR_SECONDS}s)."));
                     // Brief pause so the clipboard manager can grab the contents
                     // before the process exits (needed on Linux/Wayland).
                     thread::sleep(Duration::from_millis(100));
@@ -159,7 +171,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Delete { service } => {
             vault::unlock_vault(&conn)?;
             if db::delete_credential(&conn, &service) {
-                println!("Credential for '{service}' deleted.");
+                ui::success(&format!("Credential for '{service}' deleted."));
             } else {
                 return Err(format!("No credential found for '{service}'."));
             }
@@ -169,11 +181,11 @@ fn run(cli: Cli) -> Result<(), String> {
             vault::unlock_vault(&conn)?;
             let services = db::list_services(&conn);
             if services.is_empty() {
-                println!("No credentials stored.");
+                ui::muted("No credentials stored.");
             } else {
-                println!("Stored credentials:");
+                ui::header("Stored credentials:");
                 for s in &services {
-                    println!("  {s}");
+                    ui::list_item(s);
                 }
             }
         }
@@ -193,7 +205,15 @@ fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn main() -> process::ExitCode {
-    let cli = Cli::parse();
+    let banner = ui::colored_banner();
+    let version: &str = format!("\n{banner}\n  v{}", env!("CARGO_PKG_VERSION")).leak();
+
+    let matches = Cli::command()
+        .before_help(banner)
+        .version(version)
+        .get_matches();
+
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
     // Hidden mode: clear clipboard after a delay, then exit.
     if let Some(seconds) = cli.clear_clipboard {
@@ -207,7 +227,7 @@ fn main() -> process::ExitCode {
     match run(cli) {
         Ok(()) => process::ExitCode::SUCCESS,
         Err(msg) => {
-            eprintln!("{msg}");
+            ui::error(&msg);
             process::ExitCode::FAILURE
         }
     }
