@@ -1,7 +1,7 @@
 use arboard::Clipboard;
 use argon2::{Argon2, Algorithm, Version, Params};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key};
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng};
+use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
 use clap::{Parser, Subcommand};
 use rand::RngCore;
 use rusqlite::Connection;
@@ -12,13 +12,20 @@ use std::thread;
 use std::time::Duration;
 use zeroize::Zeroizing;
 
-const DB_PATH: &str = "vault.db";
-const TIME_COST: u32 = 3;
-const MEMORY_COST: u32 = 64 * 1024; // 64 MiB
+const TIME_COST: u32 = 4;
+const MEMORY_COST: u32 = 128 * 1024; // 128 MiB
 const PARALLELISM: u32 = 4;
 const KEY_LEN: usize = 32;
 const VERIFY_PLAINTEXT: &[u8] = b"sk2-vault-ok";
 const CLIPBOARD_CLEAR_SECONDS: u64 = 10;
+
+fn vault_path() -> std::path::PathBuf {
+    let dir = dirs::home_dir()
+        .expect("Could not determine home directory")
+        .join(".sk2");
+    std::fs::create_dir_all(&dir).expect("Failed to create vault directory");
+    dir.join("vault.db")
+}
 
 #[derive(Parser)]
 #[command(name = "sk2", about = "A local-only CLI password manager")]
@@ -52,6 +59,8 @@ enum Command {
     },
     /// List all stored service names
     List,
+    /// Change the master password
+    ChangePassword,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -157,7 +166,7 @@ fn verify_key(conn: &Connection, key: &[u8; KEY_LEN]) -> bool {
     }
 }
 
-fn encrypt(key: &[u8; KEY_LEN], username: &str, password: &str) -> (Vec<u8>, Vec<u8>) {
+fn encrypt(key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) -> (Vec<u8>, Vec<u8>) {
     let cred = Credential {
         username: username.to_string(),
         password: password.to_string(),
@@ -169,15 +178,21 @@ fn encrypt(key: &[u8; KEY_LEN], username: &str, password: &str) -> (Vec<u8>, Vec
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from_slice(&nonce_bytes);
 
-    let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).expect("Encryption failed");
+    let ciphertext = cipher.encrypt(nonce, Payload {
+        msg: plaintext.as_ref(),
+        aad: service.as_bytes(),
+    }).expect("Encryption failed");
     (nonce_bytes.to_vec(), ciphertext)
 }
 
-fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<(String, String), ()> {
+fn decrypt(key: &[u8; KEY_LEN], service: &str, nonce: &[u8], ciphertext: &[u8]) -> Result<(String, String), ()> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = XNonce::from_slice(nonce);
 
-    let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| ())?;
+    let plaintext = cipher.decrypt(nonce, Payload {
+        msg: ciphertext,
+        aad: service.as_bytes(),
+    }).map_err(|_| ())?;
 
     let cred: Credential =
         serde_json::from_slice(&plaintext).map_err(|_| ())?;
@@ -187,7 +202,7 @@ fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<(Stri
 // --- Credential storage ---
 
 fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) {
-    let (nonce, ciphertext) = encrypt(key, username, password);
+    let (nonce, ciphertext) = encrypt(key, service, username, password);
     conn.execute(
         "INSERT OR REPLACE INTO credentials (service, nonce, ciphertext)
          VALUES (?1, ?2, ?3)",
@@ -209,7 +224,7 @@ fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Opti
 
     match result {
         Ok((nonce, ciphertext)) => {
-            let (username, password) = decrypt(key, &nonce, &ciphertext)
+            let (username, password) = decrypt(key, service, &nonce, &ciphertext)
                 .expect("Data corruption — failed to decrypt credential");
             Some((username, password))
         }
@@ -260,12 +275,18 @@ fn require_vault(conn: &Connection) {
     }
 }
 
-fn restrict_db_permissions(path: &str) {
+fn restrict_db_permissions(path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(path, perms) {
+        if let Some(parent) = path.parent() {
+            let dir_perms = std::fs::Permissions::from_mode(0o700);
+            if let Err(e) = std::fs::set_permissions(parent, dir_perms) {
+                eprintln!("Warning: could not set directory permissions: {e}");
+            }
+        }
+        let file_perms = std::fs::Permissions::from_mode(0o600);
+        if let Err(e) = std::fs::set_permissions(path, file_perms) {
             eprintln!("Warning: could not set database permissions: {e}");
         }
     }
@@ -335,6 +356,76 @@ fn unlock_vault(conn: &Connection) -> Zeroizing<[u8; KEY_LEN]> {
     key
 }
 
+fn change_password(conn: &Connection) {
+    require_vault(conn);
+
+    let old_password = read_master_password();
+    let salt = load_salt(conn);
+    let old_key = derive_key(&old_password, &salt);
+    if !verify_key(conn, &old_key) {
+        eprintln!("Wrong master password.");
+        process::exit(1);
+    }
+
+    let new_password = Zeroizing::new(
+        rpassword::read_password_from_tty(Some("New master password: "))
+            .expect("Failed to read password"),
+    );
+    if new_password.is_empty() {
+        eprintln!("Password cannot be empty.");
+        process::exit(1);
+    }
+    let confirm = Zeroizing::new(
+        rpassword::read_password_from_tty(Some("Confirm new master password: "))
+            .expect("Failed to read password"),
+    );
+    if new_password != confirm {
+        eprintln!("Passwords do not match.");
+        process::exit(1);
+    }
+
+    let mut new_salt = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut new_salt);
+    let new_key = derive_key(&new_password, &new_salt);
+
+    let tx = conn.unchecked_transaction().expect("Failed to begin transaction");
+
+    // Re-encrypt all credentials
+    let mut stmt = tx
+        .prepare("SELECT service, nonce, ciphertext FROM credentials")
+        .expect("Failed to prepare query");
+    let rows: Vec<(String, Vec<u8>, Vec<u8>)> = stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .expect("Failed to query credentials")
+        .map(|r| r.expect("Failed to read row"))
+        .collect();
+    drop(stmt);
+
+    for (service, nonce, ciphertext) in &rows {
+        let (username, password) = decrypt(&old_key, service, nonce, ciphertext)
+            .expect("Data corruption — failed to decrypt credential during password change");
+        let (new_nonce, new_ciphertext) = encrypt(&new_key, service, &username, &password);
+        tx.execute(
+            "UPDATE credentials SET nonce = ?1, ciphertext = ?2 WHERE service = ?3",
+            rusqlite::params![new_nonce, new_ciphertext, service],
+        )
+        .expect("Failed to update credential");
+    }
+
+    // Re-encrypt verification token and update metadata with new salt
+    let (verify_nonce, verify_ciphertext) = encrypt_raw(&new_key, VERIFY_PLAINTEXT);
+    tx.execute(
+        "UPDATE metadata SET salt = ?1, time_cost = ?2, memory_cost = ?3, parallelism = ?4, verify_nonce = ?5, verify_ciphertext = ?6 WHERE id = 1",
+        rusqlite::params![new_salt.as_slice(), TIME_COST, MEMORY_COST, PARALLELISM, verify_nonce, verify_ciphertext],
+    )
+    .expect("Failed to update metadata");
+
+    tx.commit().expect("Failed to commit transaction");
+    println!("Master password changed.");
+}
+
 // --- Main ---
 
 fn main() {
@@ -354,8 +445,9 @@ fn main() {
         process::exit(1);
     });
 
-    let conn = Connection::open(DB_PATH).expect("Failed to open database");
-    restrict_db_permissions(DB_PATH);
+    let db_path = vault_path();
+    let conn = Connection::open(&db_path).expect("Failed to open database");
+    restrict_db_permissions(&db_path);
     init_db(&conn);
 
     match command {
@@ -448,6 +540,10 @@ fn main() {
                     println!("  {s}");
                 }
             }
+        }
+
+        Command::ChangePassword => {
+            change_password(&conn);
         }
     }
 }

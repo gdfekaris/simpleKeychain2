@@ -8,6 +8,7 @@ arboard = "3"
 argon2 = "0.5"
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive"] }
+dirs = "6"
 rand = "0.8"
 rpassword = "5"
 rusqlite = { version = "0.31", features = ["bundled"] }

@@ -6,7 +6,8 @@ A lightweight, local-only CLI password manager. No servers, no sync, no network.
 
 - Your master password is run through **Argon2id** to derive a 256-bit encryption key.
 - Each credential (username + password) is encrypted with **XChaCha20-Poly1305** using a unique random nonce.
-- Everything is stored in a local **SQLite** database (`vault.db`).
+- The service name is bound as **authenticated associated data (AAD)**, preventing ciphertext from being swapped between database rows.
+- Everything is stored in a local **SQLite** database (`~/.sk2/vault.db`).
 
 ## Installation
 
@@ -74,14 +75,23 @@ sk2 delete github
 sk2 list
 ```
 
+### Change master password
+
+```bash
+sk2 change-password
+```
+
+Re-encrypts all stored credentials under the new password. The vault remains intact if anything fails mid-way.
+
 All commands require your master password.
 
 ## Security
 
-- **Encryption** — Credentials are encrypted with XChaCha20-Poly1305. The encryption key is derived from your master password using Argon2id (3 iterations, 64 MiB).
+- **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
 - **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory as soon as they're no longer needed.
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
-- **File permissions** — On Linux/macOS, `vault.db` is set to `0600` (owner read/write only) on every run.
+- **File permissions** — On Linux/macOS, `~/.sk2/` is set to `0700` and `vault.db` to `0600` (owner-only access) on every run.
+- **Vault location** — The vault is always stored at `~/.sk2/vault.db`, so it works the same regardless of your current directory.
 
 ## Platform Support
 
