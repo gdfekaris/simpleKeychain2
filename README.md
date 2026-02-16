@@ -18,11 +18,21 @@ cd sk2-dev
 cargo build --release
 ```
 
-The binary will be at `target/release/simpleKeychain2`. You can copy it somewhere on your `$PATH`:
+### Linux / macOS
 
 ```bash
 cp target/release/simpleKeychain2 ~/.local/bin/sk2
 ```
+
+### Windows
+
+Requires [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (for compiling the bundled SQLite C library).
+
+```powershell
+copy target\release\simpleKeychain2.exe C:\Users\%USERNAME%\bin\sk2.exe
+```
+
+Make sure `C:\Users\%USERNAME%\bin` is in your `PATH`, or choose another directory that is.
 
 ## Usage
 
