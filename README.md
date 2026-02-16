@@ -88,10 +88,10 @@ All commands require your master password.
 ## Security
 
 - **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
-- **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory as soon as they're no longer needed.
+- **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory when no longer needed, including on error paths (e.g. wrong password, empty input).
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
 - **File permissions** — On Linux/macOS, `~/.sk2/` is set to `0700` and `vault.db` to `0600` (owner-only access) on every run.
-- **Vault location** — The vault is always stored at `~/.sk2/vault.db`, so it works the same regardless of your current directory.
+- **Vault location** — The vault is always stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows), so it works the same regardless of your current directory.
 
 ## Platform Support
 
