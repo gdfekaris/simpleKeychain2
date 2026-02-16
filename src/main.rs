@@ -268,11 +268,11 @@ fn vault_exists(conn: &Connection) -> bool {
     !is_first_run(conn)
 }
 
-fn require_vault(conn: &Connection) {
+fn require_vault(conn: &Connection) -> Result<(), String> {
     if !vault_exists(conn) {
-        eprintln!("Vault not initialized. Run 'init' first.");
-        process::exit(1);
+        return Err("Vault not initialized. Run 'init' first.".into());
     }
+    Ok(())
 }
 
 fn restrict_db_permissions(path: &std::path::Path) {
@@ -292,24 +292,22 @@ fn restrict_db_permissions(path: &std::path::Path) {
     }
 }
 
-fn read_master_password() -> Zeroizing<String> {
+fn read_master_password() -> Result<Zeroizing<String>, String> {
     let password = Zeroizing::new(
         rpassword::read_password_from_tty(Some("Master password: "))
             .expect("Failed to read password"),
     );
 
     if password.is_empty() {
-        eprintln!("Password cannot be empty.");
-        process::exit(1);
+        return Err("Password cannot be empty.".into());
     }
 
-    password
+    Ok(password)
 }
 
-fn init_vault(conn: &Connection) {
+fn init_vault(conn: &Connection) -> Result<(), String> {
     if vault_exists(conn) {
-        eprintln!("Vault already initialized.");
-        process::exit(1);
+        return Err("Vault already initialized.".into());
     }
 
     let password = Zeroizing::new(
@@ -318,8 +316,7 @@ fn init_vault(conn: &Connection) {
     );
 
     if password.is_empty() {
-        eprintln!("Password cannot be empty.");
-        process::exit(1);
+        return Err("Password cannot be empty.".into());
     }
 
     let confirm = Zeroizing::new(
@@ -328,8 +325,7 @@ fn init_vault(conn: &Connection) {
     );
 
     if password != confirm {
-        eprintln!("Passwords do not match.");
-        process::exit(1);
+        return Err("Passwords do not match.".into());
     }
 
     let mut salt = [0u8; 16];
@@ -340,31 +336,30 @@ fn init_vault(conn: &Connection) {
     store_metadata(conn, &salt, &verify_nonce, &verify_ciphertext);
 
     println!("Vault initialized.");
+    Ok(())
 }
 
-fn unlock_vault(conn: &Connection) -> Zeroizing<[u8; KEY_LEN]> {
-    require_vault(conn);
-    let master_password = read_master_password();
+fn unlock_vault(conn: &Connection) -> Result<Zeroizing<[u8; KEY_LEN]>, String> {
+    require_vault(conn)?;
+    let master_password = read_master_password()?;
     let salt = load_salt(conn);
     let key = derive_key(&master_password, &salt);
 
     if !verify_key(conn, &key) {
-        eprintln!("Wrong master password.");
-        process::exit(1);
+        return Err("Wrong master password.".into());
     }
 
-    key
+    Ok(key)
 }
 
-fn change_password(conn: &Connection) {
-    require_vault(conn);
+fn change_password(conn: &Connection) -> Result<(), String> {
+    require_vault(conn)?;
 
-    let old_password = read_master_password();
+    let old_password = read_master_password()?;
     let salt = load_salt(conn);
     let old_key = derive_key(&old_password, &salt);
     if !verify_key(conn, &old_key) {
-        eprintln!("Wrong master password.");
-        process::exit(1);
+        return Err("Wrong master password.".into());
     }
 
     let new_password = Zeroizing::new(
@@ -372,16 +367,14 @@ fn change_password(conn: &Connection) {
             .expect("Failed to read password"),
     );
     if new_password.is_empty() {
-        eprintln!("Password cannot be empty.");
-        process::exit(1);
+        return Err("Password cannot be empty.".into());
     }
     let confirm = Zeroizing::new(
         rpassword::read_password_from_tty(Some("Confirm new master password: "))
             .expect("Failed to read password"),
     );
     if new_password != confirm {
-        eprintln!("Passwords do not match.");
-        process::exit(1);
+        return Err("Passwords do not match.".into());
     }
 
     let mut new_salt = [0u8; 16];
@@ -424,26 +417,13 @@ fn change_password(conn: &Connection) {
 
     tx.commit().expect("Failed to commit transaction");
     println!("Master password changed.");
+    Ok(())
 }
 
 // --- Main ---
 
-fn main() {
-    let cli = Cli::parse();
-
-    // Hidden mode: clear clipboard after a delay, then exit.
-    if let Some(seconds) = cli.clear_clipboard {
-        thread::sleep(Duration::from_secs(seconds));
-        if let Ok(mut clipboard) = Clipboard::new() {
-            let _ = clipboard.set_text("");
-        }
-        return;
-    }
-
-    let command = cli.command.unwrap_or_else(|| {
-        eprintln!("No command provided. Run with --help for usage.");
-        process::exit(1);
-    });
+fn run(cli: Cli) -> Result<(), String> {
+    let command = cli.command.ok_or("No command provided. Run with --help for usage.")?;
 
     let db_path = vault_path();
     let conn = Connection::open(&db_path).expect("Failed to open database");
@@ -452,11 +432,11 @@ fn main() {
 
     match command {
         Command::Init => {
-            init_vault(&conn);
+            init_vault(&conn)?;
         }
 
         Command::Add { service } => {
-            let key = unlock_vault(&conn);
+            let key = unlock_vault(&conn)?;
             let username = prompt("Username: ");
             let password = Zeroizing::new(
                 rpassword::read_password_from_tty(Some("Password: "))
@@ -464,8 +444,7 @@ fn main() {
             );
 
             if password.is_empty() {
-                eprintln!("Password cannot be empty.");
-                process::exit(1);
+                return Err("Password cannot be empty.".into());
             }
 
             add_credential(&conn, &key, &service, &username, &password);
@@ -473,18 +452,14 @@ fn main() {
         }
 
         Command::Get { service } => {
-            let key = unlock_vault(&conn);
+            let key = unlock_vault(&conn)?;
             match get_credential(&conn, &key, &service) {
                 Some((username, password)) => {
                     let password = Zeroizing::new(password);
-                    let mut clipboard = Clipboard::new().unwrap_or_else(|e| {
-                        eprintln!("Failed to access clipboard: {e}");
-                        process::exit(1);
-                    });
-                    clipboard.set_text(&*password).unwrap_or_else(|e| {
-                        eprintln!("Failed to copy to clipboard: {e}");
-                        process::exit(1);
-                    });
+                    let mut clipboard = Clipboard::new()
+                        .map_err(|e| format!("Failed to access clipboard: {e}"))?;
+                    clipboard.set_text(&*password)
+                        .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
 
                     // Spawn a detached child process to clear the clipboard after the timeout.
                     match std::env::current_exe() {
@@ -513,24 +488,22 @@ fn main() {
                     thread::sleep(Duration::from_millis(100));
                 }
                 None => {
-                    eprintln!("No credential found for '{service}'.");
-                    process::exit(1);
+                    return Err(format!("No credential found for '{service}'."));
                 }
             }
         }
 
         Command::Delete { service } => {
-            unlock_vault(&conn);
+            unlock_vault(&conn)?;
             if delete_credential(&conn, &service) {
                 println!("Credential for '{service}' deleted.");
             } else {
-                eprintln!("No credential found for '{service}'.");
-                process::exit(1);
+                return Err(format!("No credential found for '{service}'."));
             }
         }
 
         Command::List => {
-            unlock_vault(&conn);
+            unlock_vault(&conn)?;
             let services = list_services(&conn);
             if services.is_empty() {
                 println!("No credentials stored.");
@@ -543,7 +516,30 @@ fn main() {
         }
 
         Command::ChangePassword => {
-            change_password(&conn);
+            change_password(&conn)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn main() -> process::ExitCode {
+    let cli = Cli::parse();
+
+    // Hidden mode: clear clipboard after a delay, then exit.
+    if let Some(seconds) = cli.clear_clipboard {
+        thread::sleep(Duration::from_secs(seconds));
+        if let Ok(mut clipboard) = Clipboard::new() {
+            let _ = clipboard.set_text("");
+        }
+        return process::ExitCode::SUCCESS;
+    }
+
+    match run(cli) {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(msg) => {
+            eprintln!("{msg}");
+            process::ExitCode::FAILURE
         }
     }
 }
