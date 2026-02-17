@@ -3,3 +3,5 @@ vault.db
 CLAUDE.md
 next-steps.md
 testing.md
+*.gpg
+*.csv
