@@ -3,6 +3,8 @@ mod crypto;
 mod db;
 #[cfg(feature = "export")]
 mod export;
+#[cfg(feature = "import")]
+mod import;
 mod ui;
 mod vault;
 
@@ -80,6 +82,12 @@ enum Command {
         /// Output file path
         #[arg(short, long, default_value = "sk2-export.csv.gpg")]
         output: String,
+    },
+    /// Import credentials from a GPG-encrypted CSV file
+    #[cfg(feature = "import")]
+    Import {
+        /// Path to the GPG-encrypted CSV file
+        file: String,
     },
 }
 
@@ -198,6 +206,12 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Export { output } => {
             let key = vault::unlock_vault(&conn)?;
             export::export_credentials(&conn, &key, &output)?;
+        }
+
+        #[cfg(feature = "import")]
+        Command::Import { file } => {
+            let key = vault::unlock_vault(&conn)?;
+            import::import_credentials(&conn, &key, &file)?;
         }
     }
 

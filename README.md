@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**Version 0.2.2**
+**Version 0.2.3**
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -185,6 +185,45 @@ cargo build --release --no-default-features
 ```
 
 This removes the `export` subcommand entirely — it won't appear in `--help` and the code is excluded from the binary.
+
+## Restoring from Backup
+
+sk2 can import credentials from a GPG-encrypted CSV file (the same format `export` produces). Requires [GPG](https://gnupg.org/) in your `PATH`.
+
+### Basic import
+
+```bash
+sk2 import sk2-export.csv.gpg
+```
+
+GPG will prompt for the passphrase used when the file was exported. You'll then be asked to confirm before any credentials are written.
+
+If a service in the CSV already exists in your vault, it will be silently overwritten. Services not mentioned in the CSV are left untouched.
+
+### Round-trip example
+
+```bash
+sk2 export -o backup.csv.gpg    # export from old vault
+rm ~/.sk2/vault.db               # start fresh (or move to a new machine)
+sk2 init                         # set up a new vault
+sk2 import backup.csv.gpg       # restore all credentials
+```
+
+### Security during import
+
+- **Decryption happens in GPG** — sk2 invokes `gpg --decrypt` and reads the output. The encrypted file is never parsed directly by sk2.
+- **Plaintext is held in zeroed memory** — The decrypted CSV is wrapped in `Zeroizing<String>` and automatically wiped from memory when the import completes (or on any error).
+- **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the CSV.
+- **Master password required** — The vault must be unlocked before import begins, same as every other command.
+
+### Disabling import
+
+Like export, the import feature can be excluded at compile time:
+
+```bash
+cargo build --release --no-default-features --features export   # export only, no import
+cargo build --release --no-default-features                     # neither export nor import
+```
 
 ## Security
 

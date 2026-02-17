@@ -51,7 +51,7 @@ pub(crate) fn input_prompt(msg: &str) {
     io::stdout().flush().unwrap();
 }
 
-#[cfg(feature = "export")]
+#[cfg(any(feature = "export", feature = "import"))]
 pub(crate) fn warning_block(lines: &[&str]) {
     for line in lines {
         eprintln!("{} {line}", "[!]".yellow().bold());
@@ -62,7 +62,7 @@ pub(crate) fn muted(msg: &str) {
     println!("{}", msg.dimmed());
 }
 
-#[cfg(feature = "export")]
+#[cfg(any(feature = "export", feature = "import"))]
 pub(crate) fn reminder(msg: &str) {
     println!("{}", msg.yellow().bold());
 }
