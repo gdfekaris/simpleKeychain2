@@ -3,5 +3,6 @@ vault.db
 CLAUDE.md
 next-steps.md
 testing.md
+red-team-tasks.md
 *.gpg
 *.csv

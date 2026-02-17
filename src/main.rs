@@ -163,9 +163,9 @@ fn run(cli: Cli) -> Result<(), String> {
                         }
                     }
 
-                    ui::info("Service ", &service);
-                    ui::info("Username", &username);
-                    ui::success(&format!("Password copied to clipboard (will be cleared in {CLIPBOARD_CLEAR_SECONDS}s)."));
+                    ui::get_service(&service);
+                    ui::get_username(&username);
+                    ui::clipboard_notice(CLIPBOARD_CLEAR_SECONDS);
                     // Brief pause so the clipboard manager can grab the contents
                     // before the process exits (needed on Linux/Wayland).
                     thread::sleep(Duration::from_millis(100));

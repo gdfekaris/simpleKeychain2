@@ -58,6 +58,21 @@ pub(crate) fn warning_block(lines: &[&str]) {
     }
 }
 
+pub(crate) fn get_service(value: &str) {
+    println!("    {} {} {}", "⊙".truecolor(150, 100, 50), "Service:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn get_username(value: &str) {
+    println!("  {} {} {}", "«◉»".truecolor(150, 100, 50), "Username:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn clipboard_notice(seconds: u64) {
+    println!(" {} {}",
+        "○─┤├".blue().dimmed(),
+        format!("{} copied to clipboard (will be cleared in {seconds}s)", "Password:".yellow().bold()),
+    );
+}
+
 pub(crate) fn muted(msg: &str) {
     println!("{}", msg.dimmed());
 }
