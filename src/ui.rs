@@ -13,7 +13,7 @@ pub(crate) fn colored_banner() -> String {
 }
 
 pub(crate) fn success(msg: &str) {
-    println!("{} {msg}", "[+]".green().bold());
+    println!("{}  {msg}", "[+]".green().bold());
 }
 
 pub(crate) fn error(msg: &str) {
@@ -47,7 +47,7 @@ pub(crate) fn service_password_prompt(msg: &str) {
 }
 
 pub(crate) fn input_prompt(msg: &str) {
-    print!("{} {}", "«◉»".truecolor(150, 100, 50), msg.yellow().bold());
+    print!("{}  {}", "«◉»".truecolor(150, 100, 50), msg.yellow().bold());
     io::stdout().flush().unwrap();
 }
 
@@ -59,15 +59,15 @@ pub(crate) fn warning_block(lines: &[&str]) {
 }
 
 pub(crate) fn get_service(value: &str) {
-    println!("    {} {} {}", "⊙".truecolor(150, 100, 50), "Service:".yellow().bold(), value.bold());
+    println!("{}    {} {}", "⊙".truecolor(150, 100, 50), "Service:".yellow().bold(), value.bold());
 }
 
 pub(crate) fn get_username(value: &str) {
-    println!("  {} {} {}", "«◉»".truecolor(150, 100, 50), "Username:".yellow().bold(), value.bold());
+    println!("{}  {} {}", "«◉»".truecolor(150, 100, 50), "Username:".yellow().bold(), value.bold());
 }
 
 pub(crate) fn clipboard_notice(seconds: u64) {
-    println!(" {} {}",
+    println!("{} {}",
         "○─┤├".blue().dimmed(),
         format!("{} copied to clipboard (will be cleared in {seconds}s)", "Password:".yellow().bold()),
     );
