@@ -51,7 +51,9 @@ struct Cli {
 enum Command {
     /// Initialize a new vault (set master password)
     Init,
-    /// Add or update a credential (use --generate for a random password)
+    /// Add or update a credential
+    ///
+    /// (use --generate for a random password)
     Add {
         /// The service name (e.g. "github", "gmail")
         service: String,
