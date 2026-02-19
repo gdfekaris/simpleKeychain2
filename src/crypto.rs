@@ -25,11 +25,31 @@ pub(crate) fn derive_key(master_password: &str, salt: &[u8]) -> Zeroizing<[u8; K
     key
 }
 
-pub(crate) fn generate_password(length: usize) -> Zeroizing<String> {
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?";
+#[derive(Clone, clap::ValueEnum)]
+pub(crate) enum Charset {
+    /// Letters, digits, and symbols (default)
+    Default,
+    /// Letters and digits only, no symbols
+    Alphanumeric,
+    /// RFC 3986 unreserved characters — safe in URLs and HTML forms
+    Websafe,
+    /// Lowercase hex digits (0–9, a–f)
+    Hex,
+    /// DNA alphabet (A, C, G, T)
+    Dna,
+}
+
+pub(crate) fn generate_password(length: usize, charset: &Charset) -> Zeroizing<String> {
+    let chars: &[u8] = match charset {
+        Charset::Default      => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?",
+        Charset::Alphanumeric => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        Charset::Websafe      => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~",
+        Charset::Hex          => b"0123456789abcdef",
+        Charset::Dna          => b"ACGT",
+    };
     let mut rng = rand::thread_rng();
     let password: String = (0..length)
-        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
+        .map(|_| chars[rng.gen_range(0..chars.len())] as char)
         .collect();
     Zeroizing::new(password)
 }

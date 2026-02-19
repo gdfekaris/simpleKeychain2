@@ -71,6 +71,17 @@ To specify a custom length (4–64):
 sk2 add github --generate --length 24
 ```
 
+To restrict the character set (useful when a site has password rules):
+
+```bash
+sk2 add github --generate --charset alphanumeric   # letters and digits only
+sk2 add github --generate --charset websafe        # RFC 3986 unreserved chars, safe in URLs and forms
+sk2 add github --generate --charset hex            # 0–9, a–f
+sk2 add github --generate --charset dna            # A, C, G, T
+```
+
+The default charset (`default`) uses letters, digits, and symbols. For small character sets like `hex` or `dna`, consider increasing `--length` to maintain adequate entropy — sk2 will warn you if generated entropy falls below 64 bits.
+
 ### Retrieve a credential
 
 ```bash

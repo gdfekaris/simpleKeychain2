@@ -63,6 +63,9 @@ enum Command {
         /// Length of the generated password (default: 16, range: 4–64)
         #[arg(short, long, default_value_t = 16)]
         length: usize,
+        /// Character set to use when generating a password (requires --generate)
+        #[arg(short, long, default_value = "default")]
+        charset: crypto::Charset,
     },
     /// Retrieve a credential by service name
     Get {
@@ -108,7 +111,7 @@ fn run(cli: Cli) -> Result<(), String> {
             vault::init_vault(&conn)?;
         }
 
-        Command::Add { service, generate, length } => {
+        Command::Add { service, generate, length, charset } => {
             let key = vault::unlock_vault(&conn)?;
             let username = vault::prompt("Username: ");
 
@@ -116,10 +119,27 @@ fn run(cli: Cli) -> Result<(), String> {
                 if !(4..=64).contains(&length) {
                     return Err("Password length must be between 4 and 64.".into());
                 }
-                crypto::generate_password(length)
+                let alphabet_size = match charset {
+                    crypto::Charset::Default      => 74.0_f64,
+                    crypto::Charset::Alphanumeric => 62.0,
+                    crypto::Charset::Websafe      => 66.0,
+                    crypto::Charset::Hex          => 16.0,
+                    crypto::Charset::Dna          => 4.0,
+                };
+                let entropy_bits = length as f64 * alphabet_size.log2();
+                if entropy_bits < 64.0 {
+                    ui::warning(&format!(
+                        "Low entropy: ~{:.0} bits. Consider increasing --length.",
+                        entropy_bits
+                    ));
+                }
+                crypto::generate_password(length, &charset)
             } else {
                 if length != 16 {
                     return Err("--length requires --generate.".into());
+                }
+                if !matches!(charset, crypto::Charset::Default) {
+                    return Err("--charset requires --generate.".into());
                 }
                 ui::service_password_prompt("Password: ");
                 let p = Zeroizing::new(
