@@ -108,6 +108,12 @@ sk2 get github
 
 Prints the service name, username, and how long ago the password was last set. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
 
+To copy the username to clipboard instead:
+
+```bash
+sk2 get github --username
+```
+
 If no exact match is found, sk2 falls back to a case-insensitive substring search. A single match is used automatically; multiple matches are shown as a numbered list to pick from.
 
 ### Edit a credential
@@ -161,13 +167,23 @@ You will be asked to confirm before the credential is removed. Like `get`, parti
 sk2 list
 ```
 
+To narrow the list to a substring:
+
+```bash
+sk2 list github
+```
+
 To find credentials whose password hasn't been changed recently, use `--stale`:
 
 ```bash
 sk2 list --stale
 ```
 
-This lists every credential not updated within the last 90 days.
+This lists every credential not updated within the last 90 days. The filter and `--stale` can be combined:
+
+```bash
+sk2 list github --stale        # stale credentials matching 'github'
+```
 
 To use a different threshold:
 

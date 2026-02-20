@@ -106,10 +106,10 @@ pub(crate) fn list_item_pick(n: usize, item: &str) {
     println!("  {} {}", format!("[{n}]").yellow().bold(), item.bold());
 }
 
-pub(crate) fn clipboard_notice(seconds: u64) {
-    println!("{} {}",
+pub(crate) fn clipboard_notice(label: &str, seconds: u64) {
+    println!("{} {} copied to clipboard (will be cleared in {seconds}s)",
         "○─┤├".blue().dimmed(),
-        format!("{} copied to clipboard (will be cleared in {seconds}s)", "Password:".yellow().bold()),
+        label.yellow().bold(),
     );
 }
 
