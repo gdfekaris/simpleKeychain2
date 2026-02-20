@@ -3,6 +3,13 @@ use rusqlite::Connection;
 use crate::constants::*;
 use crate::crypto;
 
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs() as i64
+}
+
 pub(crate) fn init_db(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS metadata (
@@ -21,6 +28,8 @@ pub(crate) fn init_db(conn: &Connection) {
         );",
     )
     .expect("Failed to initialize database");
+    // Idempotent migration: add updated_at column if it doesn't exist yet.
+    let _ = conn.execute("ALTER TABLE credentials ADD COLUMN updated_at INTEGER", []);
 }
 
 pub(crate) fn is_first_run(conn: &Connection) -> bool {
@@ -59,32 +68,33 @@ pub(crate) fn load_verify_token(conn: &Connection) -> (Vec<u8>, Vec<u8>) {
     .expect("Failed to load verify token")
 }
 
-pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) {
-    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password);
+pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str, notes: &str, url: &str) {
+    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password, notes, url);
     conn.execute(
-        "INSERT OR REPLACE INTO credentials (service, nonce, ciphertext)
-         VALUES (?1, ?2, ?3)",
-        rusqlite::params![service, nonce, ciphertext],
+        "INSERT OR REPLACE INTO credentials (service, nonce, ciphertext, updated_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![service, nonce, ciphertext, unix_now()],
     )
     .expect("Failed to store credential");
 }
 
-pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<(String, String)> {
+pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<(String, String, String, String, Option<i64>)> {
     let result = conn.query_row(
-        "SELECT nonce, ciphertext FROM credentials WHERE service = ?1",
+        "SELECT nonce, ciphertext, updated_at FROM credentials WHERE service = ?1",
         rusqlite::params![service],
         |row| {
             let nonce: Vec<u8> = row.get(0)?;
             let ciphertext: Vec<u8> = row.get(1)?;
-            Ok((nonce, ciphertext))
+            let updated_at: Option<i64> = row.get(2)?;
+            Ok((nonce, ciphertext, updated_at))
         },
     );
 
     match result {
-        Ok((nonce, ciphertext)) => {
-            let (username, password) = crypto::decrypt(key, service, &nonce, &ciphertext)
+        Ok((nonce, ciphertext, updated_at)) => {
+            let (username, password, notes, url) = crypto::decrypt(key, service, &nonce, &ciphertext)
                 .expect("Data corruption — failed to decrypt credential");
-            Some((username, password))
+            Some((username, password, notes, url, updated_at))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => None,
         Err(e) => panic!("Database error: {e}"),
@@ -101,12 +111,94 @@ pub(crate) fn delete_credential(conn: &Connection, service: &str) -> bool {
     rows > 0
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn update_credential(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    service: &str,
+    username: &str,
+    password: &str,
+    notes: &str,
+    url: &str,
+    update_timestamp: bool,
+) -> bool {
+    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password, notes, url);
+    let rows = if update_timestamp {
+        conn.execute(
+            "UPDATE credentials SET nonce = ?1, ciphertext = ?2, updated_at = ?3 WHERE service = ?4",
+            rusqlite::params![nonce, ciphertext, unix_now(), service],
+        )
+    } else {
+        conn.execute(
+            "UPDATE credentials SET nonce = ?1, ciphertext = ?2 WHERE service = ?3",
+            rusqlite::params![nonce, ciphertext, service],
+        )
+    }
+    .expect("Failed to update credential");
+    rows > 0
+}
+
+pub(crate) fn rename_credential(conn: &Connection, key: &[u8; KEY_LEN], old_service: &str, new_service: &str) -> Result<(), String> {
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM credentials WHERE service = ?1",
+            rusqlite::params![new_service],
+            |row| row.get(0),
+        )
+        .expect("Failed to query credentials");
+    if exists > 0 {
+        return Err(format!("A credential for '{new_service}' already exists."));
+    }
+
+    let result = conn.query_row(
+        "SELECT nonce, ciphertext, updated_at FROM credentials WHERE service = ?1",
+        rusqlite::params![old_service],
+        |row| {
+            let nonce: Vec<u8> = row.get(0)?;
+            let ciphertext: Vec<u8> = row.get(1)?;
+            let updated_at: Option<i64> = row.get(2)?;
+            Ok((nonce, ciphertext, updated_at))
+        },
+    );
+
+    let (nonce, ciphertext, updated_at) = match result {
+        Ok(data) => data,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(format!("No credential found for '{old_service}'."));
+        }
+        Err(e) => panic!("Database error: {e}"),
+    };
+
+    let (username, password, notes, url) = crypto::decrypt(key, old_service, &nonce, &ciphertext)
+        .expect("Data corruption — failed to decrypt credential");
+
+    let (new_nonce, new_ciphertext) = crypto::encrypt(key, new_service, &username, &password, &notes, &url);
+
+    conn.execute(
+        "UPDATE credentials SET service = ?1, nonce = ?2, ciphertext = ?3, updated_at = ?4 WHERE service = ?5",
+        rusqlite::params![new_service, new_nonce, new_ciphertext, updated_at, old_service],
+    )
+    .expect("Failed to rename credential");
+
+    Ok(())
+}
+
 pub(crate) fn list_services(conn: &Connection) -> Vec<String> {
     let mut stmt = conn
         .prepare("SELECT service FROM credentials ORDER BY service")
         .expect("Failed to prepare query");
 
     stmt.query_map([], |row| row.get(0))
+        .expect("Failed to query credentials")
+        .map(|r| r.expect("Failed to read row"))
+        .collect()
+}
+
+pub(crate) fn list_services_with_timestamps(conn: &Connection) -> Vec<(String, Option<i64>)> {
+    let mut stmt = conn
+        .prepare("SELECT service, updated_at FROM credentials ORDER BY service")
+        .expect("Failed to prepare query");
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .expect("Failed to query credentials")
         .map(|r| r.expect("Failed to read row"))
         .collect()

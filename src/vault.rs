@@ -15,6 +15,13 @@ pub(crate) fn prompt(msg: &str) -> String {
     input.trim().to_string()
 }
 
+pub(crate) fn plain_prompt(msg: &str) -> String {
+    ui::plain_input_prompt(msg);
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read input");
+    input.trim().to_string()
+}
+
 pub(crate) fn vault_exists(conn: &Connection) -> bool {
     !db::is_first_run(conn)
 }
@@ -143,24 +150,25 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
 
     // Re-encrypt all credentials
     let mut stmt = tx
-        .prepare("SELECT service, nonce, ciphertext FROM credentials")
+        .prepare("SELECT service, nonce, ciphertext, updated_at FROM credentials")
         .expect("Failed to prepare query");
-    let rows: Vec<(String, Vec<u8>, Vec<u8>)> = stmt
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(String, Vec<u8>, Vec<u8>, Option<i64>)> = stmt
         .query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .expect("Failed to query credentials")
         .map(|r| r.expect("Failed to read row"))
         .collect();
     drop(stmt);
 
-    for (service, nonce, ciphertext) in &rows {
-        let (username, password) = crypto::decrypt(&old_key, service, nonce, ciphertext)
+    for (service, nonce, ciphertext, updated_at) in &rows {
+        let (username, password, notes, url) = crypto::decrypt(&old_key, service, nonce, ciphertext)
             .expect("Data corruption — failed to decrypt credential during password change");
-        let (new_nonce, new_ciphertext) = crypto::encrypt(&new_key, service, &username, &password);
+        let (new_nonce, new_ciphertext) = crypto::encrypt(&new_key, service, &username, &password, &notes, &url);
         tx.execute(
-            "UPDATE credentials SET nonce = ?1, ciphertext = ?2 WHERE service = ?3",
-            rusqlite::params![new_nonce, new_ciphertext, service],
+            "UPDATE credentials SET nonce = ?1, ciphertext = ?2, updated_at = ?3 WHERE service = ?4",
+            rusqlite::params![new_nonce, new_ciphertext, updated_at, service],
         )
         .expect("Failed to update credential");
     }

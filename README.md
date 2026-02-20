@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**Version 0.2.4**
+**Version 0.2.5**
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -57,6 +57,24 @@ sk2 add github
 
 Prompts for username and password (you must provide your own password). If the service already exists, it will be overwritten.
 
+To attach a URL to the credential:
+
+```bash
+sk2 add github --url https://github.com
+```
+
+To attach notes (recovery codes, security question answers, etc.):
+
+```bash
+sk2 add github --notes
+```
+
+The `--notes` flag triggers an interactive prompt rather than accepting an inline value, so sensitive notes are never passed as a command-line argument and never appear in shell history. Both flags can be combined with each other and with `--generate`:
+
+```bash
+sk2 add github --generate --notes --url https://github.com
+```
+
 To generate a random password instead:
 
 ```bash
@@ -88,7 +106,44 @@ The default charset (`default`) uses letters, digits, and symbols. For small cha
 sk2 get github
 ```
 
-Prints the service name and username. The password is copied to your clipboard and automatically cleared after 10 seconds.
+Prints the service name, username, and how long ago the password was last set. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
+
+### Edit a credential
+
+```bash
+sk2 edit github
+```
+
+Prompts for a new username and password. Press Enter on either field to keep the current value. The password prompt is a blind TTY read — leave it blank to leave the password unchanged.
+
+To update only specific fields, use flags:
+
+```bash
+sk2 edit github --username           # prompts for username only
+sk2 edit github --password           # prompts for password only
+sk2 edit github --notes              # prompts for notes only
+sk2 edit github --url                # prompts for URL only
+sk2 edit github --notes --url        # prompts for notes and URL
+```
+
+When editing notes or URL, the current value is shown in brackets — press Enter to keep it. This is also how you add notes or a URL to a credential that was created without them.
+
+The last-updated timestamp is only refreshed when the password itself changes. Editing only the username, notes, or URL leaves the timestamp untouched.
+
+### Rename a credential
+
+```bash
+sk2 rename github github-personal
+```
+
+Renames a stored service without a delete and re-add round-trip. The credential is decrypted and re-encrypted under the new name, preserving the AAD binding. The new name must not already exist in the vault.
+
+This is also useful for introducing sub-key naming conventions after the fact:
+
+```bash
+sk2 rename gmail gmail:personal
+sk2 add gmail:work
+```
 
 ### Delete a credential
 
@@ -100,6 +155,21 @@ sk2 delete github
 
 ```bash
 sk2 list
+```
+
+To find credentials whose password hasn't been changed recently, use `--stale`:
+
+```bash
+sk2 list --stale
+```
+
+This lists every credential not updated within the last 90 days.
+
+To use a different threshold:
+
+```bash
+sk2 list --stale --days 180    # flag anything older than 6 months
+sk2 list --stale --days 30     # stricter 30-day policy
 ```
 
 ### Change master password
@@ -140,7 +210,7 @@ No sk2 needed — just GPG:
 gpg -d sk2-export.csv.gpg > credentials.csv
 ```
 
-The CSV has three columns: `name`, `username`, `password`. This format can be imported into most other password managers.
+The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Notes and URL fields will be empty for credentials that have none set.
 
 ### Extra precautions
 
@@ -201,6 +271,8 @@ This removes the `export` subcommand entirely — it won't appear in `--help` an
 
 sk2 can import credentials from a GPG-encrypted CSV file (the same format `export` produces). Requires [GPG](https://gnupg.org/) in your `PATH`.
 
+The expected CSV format is `name,username,password,notes,url`. Files exported by older versions of sk2 with only three columns (`name,username,password`) are also accepted — notes and URL will be left empty for those rows.
+
 ### Basic import
 
 ```bash
@@ -226,6 +298,7 @@ sk2 import backup.csv.gpg       # restore all credentials
 - **Plaintext is held in zeroed memory** — The decrypted CSV is wrapped in `Zeroizing<String>` and automatically wiped from memory when the import completes (or on any error).
 - **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the CSV.
 - **Master password required** — The vault must be unlocked before import begins, same as every other command.
+- **Timestamps reset on import** — Imported credentials receive a last-updated timestamp of the moment of import. The CSV format does not carry age information, so sk2 has no way to know when each password was originally set. This means `sk2 list --stale` will measure staleness from the import date, not from when the passwords were created. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
 
 ### Disabling import
 

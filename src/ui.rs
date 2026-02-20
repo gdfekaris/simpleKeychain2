@@ -51,6 +51,11 @@ pub(crate) fn input_prompt(msg: &str) {
     io::stdout().flush().unwrap();
 }
 
+pub(crate) fn plain_input_prompt(msg: &str) {
+    print!("     {}", msg.yellow().bold());
+    io::stdout().flush().unwrap();
+}
+
 #[cfg(any(feature = "export", feature = "import"))]
 pub(crate) fn warning_block(lines: &[&str]) {
     for line in lines {
@@ -64,6 +69,37 @@ pub(crate) fn get_service(value: &str) {
 
 pub(crate) fn get_username(value: &str) {
     println!("{}  {} {}", "«◉»".truecolor(150, 100, 50), "Username:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn get_url(value: &str) {
+    println!("     {} {}", "URL:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn get_notes(value: &str) {
+    println!("     {} {}", "Notes:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn get_updated_at(ts: Option<i64>) {
+    let age = match ts {
+        None => "unknown".to_string(),
+        Some(ts) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs() as i64;
+            let days = (now - ts).max(0) / 86400;
+            match days {
+                0 => "today".to_string(),
+                1 => "1 day ago".to_string(),
+                n => format!("{n} days ago"),
+            }
+        }
+    };
+    println!("     {} {}", "Updated:".yellow().bold(), age);
+}
+
+pub(crate) fn list_item_stale(item: &str, age: &str) {
+    println!("  {} {}  {}", "›".yellow(), item, age.dimmed());
 }
 
 pub(crate) fn clipboard_notice(seconds: u64) {

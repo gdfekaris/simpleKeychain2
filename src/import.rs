@@ -103,9 +103,9 @@ pub(crate) fn import_credentials(
 
     // Validate header
     let header = lines.next().ok_or("CSV file is empty.")?;
-    if header != "name,username,password" {
+    if header != "name,username,password" && header != "name,username,password,notes,url" {
         return Err(format!(
-            "Invalid CSV header. Expected 'name,username,password', got '{header}'."
+            "Invalid CSV header. Expected 'name,username,password,notes,url', got '{header}'."
         ));
     }
 
@@ -129,9 +129,9 @@ pub(crate) fn import_credentials(
             }
         };
 
-        if fields.len() != 3 {
+        if fields.len() != 3 && fields.len() != 5 {
             ui::warning(&format!(
-                "Line {line_num}: expected 3 fields, got {}, skipping.",
+                "Line {line_num}: expected 3 or 5 fields, got {}, skipping.",
                 fields.len()
             ));
             skipped += 1;
@@ -141,6 +141,8 @@ pub(crate) fn import_credentials(
         let service = &fields[0];
         let username = &fields[1];
         let password = &fields[2];
+        let notes = fields.get(3).map(|s| s.as_str()).unwrap_or("");
+        let url = fields.get(4).map(|s| s.as_str()).unwrap_or("");
 
         if service.is_empty() {
             ui::warning(&format!("Line {line_num}: empty service name, skipping."));
@@ -148,7 +150,7 @@ pub(crate) fn import_credentials(
             continue;
         }
 
-        db::add_credential(conn, key, service, username, password);
+        db::add_credential(conn, key, service, username, password, notes, url);
         imported += 1;
     }
 
