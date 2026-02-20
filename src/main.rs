@@ -79,6 +79,24 @@ enum Command {
     },
     /// List all stored service names
     List,
+    /// Edit an existing credential
+    Edit {
+        /// The service name to edit
+        service: String,
+        /// Edit only the username
+        #[arg(long)]
+        username: bool,
+        /// Edit only the password
+        #[arg(long)]
+        password: bool,
+    },
+    /// Rename a stored service
+    Rename {
+        /// The current service name
+        old_service: String,
+        /// The new service name
+        new_service: String,
+    },
     /// Change the master password
     ChangePassword,
     /// Export all credentials as a GPG-encrypted CSV file
@@ -218,6 +236,47 @@ fn run(cli: Cli) -> Result<(), String> {
                     ui::list_item(s);
                 }
             }
+        }
+
+        Command::Edit { service, username: edit_username, password: edit_password } => {
+            let key = vault::unlock_vault(&conn)?;
+
+            let (current_username, current_password) = db::get_credential(&conn, &key, &service)
+                .ok_or_else(|| format!("No credential found for '{service}'."))?;
+            let current_password = Zeroizing::new(current_password);
+
+            let neither = !edit_username && !edit_password;
+            let prompt_username = edit_username || neither;
+            let prompt_password = edit_password || neither;
+
+            let new_username = if prompt_username {
+                let input = vault::prompt(&format!("Username [{}]: ", current_username));
+                if input.is_empty() { current_username } else { input }
+            } else {
+                current_username
+            };
+
+            let new_password: Zeroizing<String> = if prompt_password {
+                ui::service_password_prompt("New password (leave blank to keep current): ");
+                let input = Zeroizing::new(
+                    rpassword::read_password_from_tty(None)
+                        .expect("Failed to read password"),
+                );
+                if input.is_empty() { current_password } else { input }
+            } else {
+                current_password
+            };
+
+            if !db::update_credential(&conn, &key, &service, &new_username, &new_password) {
+                return Err(format!("No credential found for '{service}'."));
+            }
+            ui::success(&format!("Credential for '{service}' updated."));
+        }
+
+        Command::Rename { old_service, new_service } => {
+            let key = vault::unlock_vault(&conn)?;
+            db::rename_credential(&conn, &key, &old_service, &new_service)?;
+            ui::success(&format!("Renamed '{old_service}' to '{new_service}'."));
         }
 
         Command::ChangePassword => {

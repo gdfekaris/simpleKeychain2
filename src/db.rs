@@ -101,6 +101,61 @@ pub(crate) fn delete_credential(conn: &Connection, service: &str) -> bool {
     rows > 0
 }
 
+pub(crate) fn update_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) -> bool {
+    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password);
+    let rows = conn
+        .execute(
+            "UPDATE credentials SET nonce = ?1, ciphertext = ?2 WHERE service = ?3",
+            rusqlite::params![nonce, ciphertext, service],
+        )
+        .expect("Failed to update credential");
+    rows > 0
+}
+
+pub(crate) fn rename_credential(conn: &Connection, key: &[u8; KEY_LEN], old_service: &str, new_service: &str) -> Result<(), String> {
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM credentials WHERE service = ?1",
+            rusqlite::params![new_service],
+            |row| row.get(0),
+        )
+        .expect("Failed to query credentials");
+    if exists > 0 {
+        return Err(format!("A credential for '{new_service}' already exists."));
+    }
+
+    let result = conn.query_row(
+        "SELECT nonce, ciphertext FROM credentials WHERE service = ?1",
+        rusqlite::params![old_service],
+        |row| {
+            let nonce: Vec<u8> = row.get(0)?;
+            let ciphertext: Vec<u8> = row.get(1)?;
+            Ok((nonce, ciphertext))
+        },
+    );
+
+    let (nonce, ciphertext) = match result {
+        Ok(data) => data,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(format!("No credential found for '{old_service}'."));
+        }
+        Err(e) => panic!("Database error: {e}"),
+    };
+
+    let (username, password) = crypto::decrypt(key, old_service, &nonce, &ciphertext)
+        .expect("Data corruption — failed to decrypt credential");
+
+    let (new_nonce, new_ciphertext) = crypto::encrypt(key, new_service, &username, &password);
+
+    conn.execute(
+        "UPDATE credentials SET service = ?1, nonce = ?2, ciphertext = ?3 WHERE service = ?4",
+        rusqlite::params![new_service, new_nonce, new_ciphertext, old_service],
+    )
+    .expect("Failed to rename credential");
+
+    Ok(())
+}
+
 pub(crate) fn list_services(conn: &Connection) -> Vec<String> {
     let mut stmt = conn
         .prepare("SELECT service FROM credentials ORDER BY service")

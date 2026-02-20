@@ -90,6 +90,36 @@ sk2 get github
 
 Prints the service name and username. The password is copied to your clipboard and automatically cleared after 10 seconds.
 
+### Edit a credential
+
+```bash
+sk2 edit github
+```
+
+Prompts for a new username and password. Press Enter on either field to keep the current value. The password prompt is a blind TTY read — leave it blank to leave the password unchanged.
+
+To update only one field, use a flag:
+
+```bash
+sk2 edit github --username   # prompts for username only
+sk2 edit github --password   # prompts for password only
+```
+
+### Rename a credential
+
+```bash
+sk2 rename github github-personal
+```
+
+Renames a stored service without a delete and re-add round-trip. The credential is decrypted and re-encrypted under the new name, preserving the AAD binding. The new name must not already exist in the vault.
+
+This is also useful for introducing sub-key naming conventions after the fact:
+
+```bash
+sk2 rename gmail gmail:personal
+sk2 add gmail:work
+```
+
 ### Delete a credential
 
 ```bash
