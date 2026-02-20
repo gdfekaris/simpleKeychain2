@@ -106,7 +106,7 @@ The default charset (`default`) uses letters, digits, and symbols. For small cha
 sk2 get github
 ```
 
-Prints the service name and username. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
+Prints the service name, username, and how long ago the password was last set. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
 
 ### Edit a credential
 
@@ -127,6 +127,8 @@ sk2 edit github --notes --url        # prompts for notes and URL
 ```
 
 When editing notes or URL, the current value is shown in brackets — press Enter to keep it. This is also how you add notes or a URL to a credential that was created without them.
+
+The last-updated timestamp is only refreshed when the password itself changes. Editing only the username, notes, or URL leaves the timestamp untouched.
 
 ### Rename a credential
 
@@ -153,6 +155,21 @@ sk2 delete github
 
 ```bash
 sk2 list
+```
+
+To find credentials whose password hasn't been changed recently, use `--stale`:
+
+```bash
+sk2 list --stale
+```
+
+This lists every credential not updated within the last 90 days. Credentials that existed before this feature was added (with no recorded timestamp) are always included.
+
+To use a different threshold:
+
+```bash
+sk2 list --stale --days 180    # flag anything older than 6 months
+sk2 list --stale --days 30     # stricter 30-day policy
 ```
 
 ### Change master password
@@ -281,6 +298,7 @@ sk2 import backup.csv.gpg       # restore all credentials
 - **Plaintext is held in zeroed memory** — The decrypted CSV is wrapped in `Zeroizing<String>` and automatically wiped from memory when the import completes (or on any error).
 - **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the CSV.
 - **Master password required** — The vault must be unlocked before import begins, same as every other command.
+- **Timestamps reset on import** — Imported credentials receive a last-updated timestamp of the moment of import. The CSV format does not carry age information, so sk2 has no way to know when each password was originally set. This means `sk2 list --stale` will measure staleness from the import date, not from when the passwords were created. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
 
 ### Disabling import
 

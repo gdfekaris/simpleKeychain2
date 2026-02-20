@@ -57,7 +57,7 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
     let mut csv = Zeroizing::new(String::from("name,username,password,notes,url\n"));
     for service in &services {
         match db::get_credential(conn, key, service) {
-            Some((username, password, notes, url)) => {
+            Some((username, password, notes, url, _)) => {
                 let password = Zeroizing::new(password);
                 csv.push_str(&csv_escape(service));
                 csv.push(',');

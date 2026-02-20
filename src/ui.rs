@@ -79,6 +79,29 @@ pub(crate) fn get_notes(value: &str) {
     println!("     {} {}", "Notes:".yellow().bold(), value.bold());
 }
 
+pub(crate) fn get_updated_at(ts: Option<i64>) {
+    let age = match ts {
+        None => "unknown".to_string(),
+        Some(ts) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs() as i64;
+            let days = (now - ts).max(0) / 86400;
+            match days {
+                0 => "today".to_string(),
+                1 => "1 day ago".to_string(),
+                n => format!("{n} days ago"),
+            }
+        }
+    };
+    println!("     {} {}", "Updated:".yellow().bold(), age.bold());
+}
+
+pub(crate) fn list_item_stale(item: &str, age: &str) {
+    println!("  {} {}  {}", "›".yellow(), item, age.dimmed());
+}
+
 pub(crate) fn clipboard_notice(seconds: u64) {
     println!("{} {}",
         "○─┤├".blue().dimmed(),

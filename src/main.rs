@@ -84,7 +84,14 @@ enum Command {
         service: String,
     },
     /// List all stored service names
-    List,
+    List {
+        /// Show only credentials not updated within the threshold
+        #[arg(long)]
+        stale: bool,
+        /// Staleness threshold in days for --stale (default: 90)
+        #[arg(long, default_value_t = 90)]
+        days: u64,
+    },
     /// Edit an existing credential
     Edit {
         /// The service name to edit
@@ -193,7 +200,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Get { service } => {
             let key = vault::unlock_vault(&conn)?;
             match db::get_credential(&conn, &key, &service) {
-                Some((username, password, notes, url)) => {
+                Some((username, password, notes, url, updated_at)) => {
                     let password = Zeroizing::new(password);
                     let mut clipboard = Clipboard::new()
                         .map_err(|e| format!("Failed to access clipboard: {e}"))?;
@@ -227,6 +234,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     if !notes.is_empty() {
                         ui::get_notes(&notes);
                     }
+                    ui::get_updated_at(updated_at);
                     ui::clipboard_notice(CLIPBOARD_CLEAR_SECONDS);
                     // Brief pause so the clipboard manager can grab the contents
                     // before the process exits (needed on Linux/Wayland).
@@ -247,15 +255,47 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::List => {
+        Command::List { stale, days } => {
             vault::unlock_vault(&conn)?;
-            let services = db::list_services(&conn);
-            if services.is_empty() {
-                ui::muted("No credentials stored.");
+            if stale {
+                let entries = db::list_services_with_timestamps(&conn);
+                if entries.is_empty() {
+                    ui::muted("No credentials stored.");
+                } else {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs() as i64;
+                    let threshold = (days * 86400) as i64;
+                    let stale_entries: Vec<_> = entries.iter().filter(|(_, ts)| {
+                        ts.is_none_or(|t| now - t >= threshold)
+                    }).collect();
+                    if stale_entries.is_empty() {
+                        ui::muted(&format!("No credentials older than {days} days."));
+                    } else {
+                        ui::header(&format!("Credentials not updated in {days}+ days:"));
+                        for (service, ts) in &stale_entries {
+                            let age = ts.map_or("unknown age".to_string(), |t| {
+                                let d = (now - t).max(0) / 86400;
+                                match d {
+                                    0 => "today".to_string(),
+                                    1 => "1 day ago".to_string(),
+                                    n => format!("{n} days ago"),
+                                }
+                            });
+                            ui::list_item_stale(service, &age);
+                        }
+                    }
+                }
             } else {
-                ui::header("Stored credentials:");
-                for s in &services {
-                    ui::list_item(s);
+                let services = db::list_services(&conn);
+                if services.is_empty() {
+                    ui::muted("No credentials stored.");
+                } else {
+                    ui::header("Stored credentials:");
+                    for s in &services {
+                        ui::list_item(s);
+                    }
                 }
             }
         }
@@ -263,7 +303,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Edit { service, username: edit_username, password: edit_password, notes: edit_notes, url: edit_url } => {
             let key = vault::unlock_vault(&conn)?;
 
-            let (current_username, current_password, current_notes, current_url) =
+            let (current_username, current_password, current_notes, current_url, _) =
                 db::get_credential(&conn, &key, &service)
                     .ok_or_else(|| format!("No credential found for '{service}'."))?;
             let current_password = Zeroizing::new(current_password);
@@ -279,13 +319,19 @@ fn run(cli: Cli) -> Result<(), String> {
                 current_username
             };
 
+            let mut password_was_changed = false;
             let new_password: Zeroizing<String> = if prompt_password {
                 ui::service_password_prompt("New password (leave blank to keep current): ");
                 let input = Zeroizing::new(
                     rpassword::read_password_from_tty(None)
                         .expect("Failed to read password"),
                 );
-                if input.is_empty() { current_password } else { input }
+                if input.is_empty() {
+                    current_password
+                } else {
+                    password_was_changed = true;
+                    input
+                }
             } else {
                 current_password
             };
@@ -306,7 +352,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 current_url
             };
 
-            if !db::update_credential(&conn, &key, &service, &new_username, &new_password, &new_notes, &new_url) {
+            if !db::update_credential(&conn, &key, &service, &new_username, &new_password, &new_notes, &new_url, password_was_changed) {
                 return Err(format!("No credential found for '{service}'."));
             }
             ui::success(&format!("Credential for '{service}' updated."));
