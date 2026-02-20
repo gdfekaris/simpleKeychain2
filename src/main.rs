@@ -77,6 +77,9 @@ enum Command {
     Get {
         /// The service name to look up
         service: String,
+        /// Copy the username to clipboard instead of the password
+        #[arg(long)]
+        username: bool,
     },
     /// Delete a credential by service name
     Delete {
@@ -85,6 +88,8 @@ enum Command {
     },
     /// List all stored service names
     List {
+        /// Optional substring filter (show only matching service names)
+        filter: Option<String>,
         /// Show only credentials not updated within the threshold
         #[arg(long)]
         stale: bool,
@@ -131,6 +136,38 @@ enum Command {
         /// Path to the GPG-encrypted CSV file
         file: String,
     },
+}
+
+// --- Service resolution (partial-match) ---
+
+fn pick_service(matches: &[String]) -> Result<String, String> {
+    ui::header("No exact match. Close results:");
+    for (i, s) in matches.iter().enumerate() {
+        ui::list_item_pick(i + 1, s);
+    }
+    let input = vault::prompt("Pick a number (or Enter to cancel): ");
+    if input.is_empty() {
+        return Err("Cancelled.".into());
+    }
+    match input.parse::<usize>() {
+        Ok(n) if n >= 1 && n <= matches.len() => Ok(matches[n - 1].clone()),
+        _ => Err(format!("Invalid selection. Enter a number between 1 and {}.", matches.len())),
+    }
+}
+
+fn resolve_service(conn: &Connection, query: &str) -> Result<String, String> {
+    if db::service_exists(conn, query) {
+        return Ok(query.to_string());
+    }
+    let matches = db::find_matching_services(conn, query);
+    match matches.as_slice() {
+        [] => Err(format!("No credential found for '{query}'.")),
+        [single] => {
+            ui::muted(&format!("No exact match — using '{single}'"));
+            Ok(single.clone())
+        }
+        _ => pick_service(&matches),
+    }
 }
 
 // --- Main ---
@@ -197,14 +234,17 @@ fn run(cli: Cli) -> Result<(), String> {
             ui::success(&format!("Credential stored for '{service}'."));
         }
 
-        Command::Get { service } => {
+        Command::Get { service, username: copy_username } => {
             let key = vault::unlock_vault(&conn)?;
+            let service = resolve_service(&conn, &service)?;
             match db::get_credential(&conn, &key, &service) {
                 Some((username, password, notes, url, updated_at)) => {
                     let password = Zeroizing::new(password);
+                    let clipboard_text: &str = if copy_username { &username } else { &password };
+                    let clipboard_label = if copy_username { "Username:" } else { "Password:" };
                     let mut clipboard = Clipboard::new()
                         .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-                    clipboard.set_text(&*password)
+                    clipboard.set_text(clipboard_text)
                         .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
 
                     // Spawn a detached child process to clear the clipboard after the timeout.
@@ -235,7 +275,7 @@ fn run(cli: Cli) -> Result<(), String> {
                         ui::get_notes(&notes);
                     }
                     ui::get_updated_at(updated_at);
-                    ui::clipboard_notice(CLIPBOARD_CLEAR_SECONDS);
+                    ui::clipboard_notice(clipboard_label, CLIPBOARD_CLEAR_SECONDS);
                     // Brief pause so the clipboard manager can grab the contents
                     // before the process exits (needed on Linux/Wayland).
                     thread::sleep(Duration::from_millis(100));
@@ -248,6 +288,11 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Delete { service } => {
             vault::unlock_vault(&conn)?;
+            let service = resolve_service(&conn, &service)?;
+            let confirm = vault::plain_prompt(&format!("Delete credential for '{service}'? [y/N]: "));
+            if confirm.trim().to_lowercase() != "y" {
+                return Err("Deletion cancelled.".into());
+            }
             if db::delete_credential(&conn, &service) {
                 ui::success(&format!("Credential for '{service}' deleted."));
             } else {
@@ -255,10 +300,16 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::List { stale, days } => {
+        Command::List { filter, stale, days } => {
             vault::unlock_vault(&conn)?;
             if stale {
-                let entries = db::list_services_with_timestamps(&conn);
+                let all_entries = db::list_services_with_timestamps(&conn);
+                let entries: Vec<_> = if let Some(ref q) = filter {
+                    let q_lower = q.to_lowercase();
+                    all_entries.into_iter().filter(|(s, _)| s.to_lowercase().contains(&q_lower)).collect()
+                } else {
+                    all_entries
+                };
                 if entries.is_empty() {
                     ui::muted("No credentials stored.");
                 } else {
@@ -288,11 +339,22 @@ fn run(cli: Cli) -> Result<(), String> {
                     }
                 }
             } else {
-                let services = db::list_services(&conn);
+                let services = match &filter {
+                    Some(q) => db::find_matching_services(&conn, q),
+                    None => db::list_services(&conn),
+                };
                 if services.is_empty() {
-                    ui::muted("No credentials stored.");
+                    if let Some(q) = &filter {
+                        ui::muted(&format!("No credentials matching '{q}'."));
+                    } else {
+                        ui::muted("No credentials stored.");
+                    }
                 } else {
-                    ui::header("Stored credentials:");
+                    let heading = match &filter {
+                        Some(q) => format!("Credentials matching '{q}':"),
+                        None => "Stored credentials:".to_string(),
+                    };
+                    ui::header(&heading);
                     for s in &services {
                         ui::list_item(s);
                     }
@@ -302,6 +364,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Edit { service, username: edit_username, password: edit_password, notes: edit_notes, url: edit_url } => {
             let key = vault::unlock_vault(&conn)?;
+            let service = resolve_service(&conn, &service)?;
 
             let (current_username, current_password, current_notes, current_url, _) =
                 db::get_credential(&conn, &key, &service)
@@ -360,6 +423,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Rename { old_service, new_service } => {
             let key = vault::unlock_vault(&conn)?;
+            let old_service = resolve_service(&conn, &old_service)?;
             db::rename_credential(&conn, &key, &old_service, &new_service)?;
             ui::success(&format!("Renamed '{old_service}' to '{new_service}'."));
         }
