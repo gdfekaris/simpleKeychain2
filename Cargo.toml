@@ -2,6 +2,7 @@
 name = "simpleKeychain2"
 version = "0.2.7"
 edition = "2024"
+license = "MIT"
 
 [features]
 default = ["export", "import"]
