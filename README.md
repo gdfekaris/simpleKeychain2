@@ -153,7 +153,7 @@ sk2 add gmail:work
 sk2 delete github
 ```
 
-Like `get`, partial matching applies if no exact service name is found.
+You will be asked to confirm before the credential is removed. Like `get`, partial matching applies if no exact service name is found.
 
 ### List all services
 

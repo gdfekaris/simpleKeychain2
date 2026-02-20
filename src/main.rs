@@ -282,6 +282,10 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Delete { service } => {
             vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
+            let confirm = vault::plain_prompt(&format!("Delete credential for '{service}'? [y/N]: "));
+            if confirm.trim().to_lowercase() != "y" {
+                return Err("Deletion cancelled.".into());
+            }
             if db::delete_credential(&conn, &service) {
                 ui::success(&format!("Credential for '{service}' deleted."));
             } else {
