@@ -59,8 +59,8 @@ pub(crate) fn load_verify_token(conn: &Connection) -> (Vec<u8>, Vec<u8>) {
     .expect("Failed to load verify token")
 }
 
-pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) {
-    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password);
+pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str, notes: &str, url: &str) {
+    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password, notes, url);
     conn.execute(
         "INSERT OR REPLACE INTO credentials (service, nonce, ciphertext)
          VALUES (?1, ?2, ?3)",
@@ -69,7 +69,7 @@ pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &s
     .expect("Failed to store credential");
 }
 
-pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<(String, String)> {
+pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<(String, String, String, String)> {
     let result = conn.query_row(
         "SELECT nonce, ciphertext FROM credentials WHERE service = ?1",
         rusqlite::params![service],
@@ -82,9 +82,9 @@ pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &s
 
     match result {
         Ok((nonce, ciphertext)) => {
-            let (username, password) = crypto::decrypt(key, service, &nonce, &ciphertext)
+            let (username, password, notes, url) = crypto::decrypt(key, service, &nonce, &ciphertext)
                 .expect("Data corruption — failed to decrypt credential");
-            Some((username, password))
+            Some((username, password, notes, url))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => None,
         Err(e) => panic!("Database error: {e}"),
@@ -101,8 +101,8 @@ pub(crate) fn delete_credential(conn: &Connection, service: &str) -> bool {
     rows > 0
 }
 
-pub(crate) fn update_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) -> bool {
-    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password);
+pub(crate) fn update_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str, notes: &str, url: &str) -> bool {
+    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password, notes, url);
     let rows = conn
         .execute(
             "UPDATE credentials SET nonce = ?1, ciphertext = ?2 WHERE service = ?3",
@@ -142,10 +142,10 @@ pub(crate) fn rename_credential(conn: &Connection, key: &[u8; KEY_LEN], old_serv
         Err(e) => panic!("Database error: {e}"),
     };
 
-    let (username, password) = crypto::decrypt(key, old_service, &nonce, &ciphertext)
+    let (username, password, notes, url) = crypto::decrypt(key, old_service, &nonce, &ciphertext)
         .expect("Data corruption — failed to decrypt credential");
 
-    let (new_nonce, new_ciphertext) = crypto::encrypt(key, new_service, &username, &password);
+    let (new_nonce, new_ciphertext) = crypto::encrypt(key, new_service, &username, &password, &notes, &url);
 
     conn.execute(
         "UPDATE credentials SET service = ?1, nonce = ?2, ciphertext = ?3 WHERE service = ?4",

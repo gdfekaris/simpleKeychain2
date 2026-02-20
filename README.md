@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**Version 0.2.4**
+**Version 0.2.5**
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -57,6 +57,24 @@ sk2 add github
 
 Prompts for username and password (you must provide your own password). If the service already exists, it will be overwritten.
 
+To attach a URL to the credential:
+
+```bash
+sk2 add github --url https://github.com
+```
+
+To attach notes (recovery codes, security question answers, etc.):
+
+```bash
+sk2 add github --notes
+```
+
+The `--notes` flag triggers an interactive prompt rather than accepting an inline value, so sensitive notes are never passed as a command-line argument and never appear in shell history. Both flags can be combined with each other and with `--generate`:
+
+```bash
+sk2 add github --generate --notes --url https://github.com
+```
+
 To generate a random password instead:
 
 ```bash
@@ -88,7 +106,7 @@ The default charset (`default`) uses letters, digits, and symbols. For small cha
 sk2 get github
 ```
 
-Prints the service name and username. The password is copied to your clipboard and automatically cleared after 10 seconds.
+Prints the service name and username. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
 
 ### Edit a credential
 
@@ -98,12 +116,17 @@ sk2 edit github
 
 Prompts for a new username and password. Press Enter on either field to keep the current value. The password prompt is a blind TTY read — leave it blank to leave the password unchanged.
 
-To update only one field, use a flag:
+To update only specific fields, use flags:
 
 ```bash
-sk2 edit github --username   # prompts for username only
-sk2 edit github --password   # prompts for password only
+sk2 edit github --username           # prompts for username only
+sk2 edit github --password           # prompts for password only
+sk2 edit github --notes              # prompts for notes only
+sk2 edit github --url                # prompts for URL only
+sk2 edit github --notes --url        # prompts for notes and URL
 ```
+
+When editing notes or URL, the current value is shown in brackets — press Enter to keep it. This is also how you add notes or a URL to a credential that was created without them.
 
 ### Rename a credential
 
@@ -170,7 +193,7 @@ No sk2 needed — just GPG:
 gpg -d sk2-export.csv.gpg > credentials.csv
 ```
 
-The CSV has three columns: `name`, `username`, `password`. This format can be imported into most other password managers.
+The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Notes and URL fields will be empty for credentials that have none set.
 
 ### Extra precautions
 
@@ -230,6 +253,8 @@ This removes the `export` subcommand entirely — it won't appear in `--help` an
 ## Restoring from Backup
 
 sk2 can import credentials from a GPG-encrypted CSV file (the same format `export` produces). Requires [GPG](https://gnupg.org/) in your `PATH`.
+
+The expected CSV format is `name,username,password,notes,url`. Files exported by older versions of sk2 with only three columns (`name,username,password`) are also accepted — notes and URL will be left empty for those rows.
 
 ### Basic import
 

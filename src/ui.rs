@@ -51,6 +51,11 @@ pub(crate) fn input_prompt(msg: &str) {
     io::stdout().flush().unwrap();
 }
 
+pub(crate) fn plain_input_prompt(msg: &str) {
+    print!("     {}", msg.yellow().bold());
+    io::stdout().flush().unwrap();
+}
+
 #[cfg(any(feature = "export", feature = "import"))]
 pub(crate) fn warning_block(lines: &[&str]) {
     for line in lines {
@@ -64,6 +69,14 @@ pub(crate) fn get_service(value: &str) {
 
 pub(crate) fn get_username(value: &str) {
     println!("{}  {} {}", "«◉»".truecolor(150, 100, 50), "Username:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn get_url(value: &str) {
+    println!("     {} {}", "URL:".yellow().bold(), value.bold());
+}
+
+pub(crate) fn get_notes(value: &str) {
+    println!("     {} {}", "Notes:".yellow().bold(), value.bold());
 }
 
 pub(crate) fn clipboard_notice(seconds: u64) {

@@ -11,6 +11,10 @@ use crate::constants::*;
 struct Credential {
     username: String,
     password: String,
+    #[serde(default)]
+    notes: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 pub(crate) fn derive_key(master_password: &str, salt: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
@@ -76,10 +80,12 @@ pub(crate) fn verify_key(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -
     }
 }
 
-pub(crate) fn encrypt(key: &[u8; KEY_LEN], service: &str, username: &str, password: &str) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn encrypt(key: &[u8; KEY_LEN], service: &str, username: &str, password: &str, notes: &str, url: &str) -> (Vec<u8>, Vec<u8>) {
     let cred = Credential {
         username: username.to_string(),
         password: password.to_string(),
+        notes: if notes.is_empty() { None } else { Some(notes.to_string()) },
+        url: if url.is_empty() { None } else { Some(url.to_string()) },
     };
     let plaintext = serde_json::to_vec(&cred).expect("Failed to serialize credential");
 
@@ -95,7 +101,7 @@ pub(crate) fn encrypt(key: &[u8; KEY_LEN], service: &str, username: &str, passwo
     (nonce_bytes.to_vec(), ciphertext)
 }
 
-pub(crate) fn decrypt(key: &[u8; KEY_LEN], service: &str, nonce: &[u8], ciphertext: &[u8]) -> Result<(String, String), ()> {
+pub(crate) fn decrypt(key: &[u8; KEY_LEN], service: &str, nonce: &[u8], ciphertext: &[u8]) -> Result<(String, String, String, String), ()> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = XNonce::from_slice(nonce);
 
@@ -106,5 +112,10 @@ pub(crate) fn decrypt(key: &[u8; KEY_LEN], service: &str, nonce: &[u8], cipherte
 
     let cred: Credential =
         serde_json::from_slice(&plaintext).map_err(|_| ())?;
-    Ok((cred.username, cred.password))
+    Ok((
+        cred.username,
+        cred.password,
+        cred.notes.unwrap_or_default(),
+        cred.url.unwrap_or_default(),
+    ))
 }

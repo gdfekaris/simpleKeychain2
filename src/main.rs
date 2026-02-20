@@ -66,6 +66,12 @@ enum Command {
         /// Character set to use when generating a password (requires --generate)
         #[arg(short, long, default_value = "default")]
         charset: crypto::Charset,
+        /// Prompt for notes after the password step (recovery codes, security questions, etc.)
+        #[arg(long)]
+        notes: bool,
+        /// Optional URL for the service
+        #[arg(long)]
+        url: Option<String>,
     },
     /// Retrieve a credential by service name
     Get {
@@ -89,6 +95,12 @@ enum Command {
         /// Edit only the password
         #[arg(long)]
         password: bool,
+        /// Edit only the notes
+        #[arg(long)]
+        notes: bool,
+        /// Edit only the URL
+        #[arg(long)]
+        url: bool,
     },
     /// Rename a stored service
     Rename {
@@ -129,7 +141,7 @@ fn run(cli: Cli) -> Result<(), String> {
             vault::init_vault(&conn)?;
         }
 
-        Command::Add { service, generate, length, charset } => {
+        Command::Add { service, generate, length, charset, notes, url } => {
             let key = vault::unlock_vault(&conn)?;
             let username = vault::prompt("Username: ");
 
@@ -170,14 +182,18 @@ fn run(cli: Cli) -> Result<(), String> {
                 p
             };
 
-            db::add_credential(&conn, &key, &service, &username, &password);
+            let notes_value = if notes { vault::plain_prompt("Notes: ") } else { String::new() };
+
+            db::add_credential(&conn, &key, &service, &username, &password,
+                &notes_value,
+                url.as_deref().unwrap_or(""));
             ui::success(&format!("Credential stored for '{service}'."));
         }
 
         Command::Get { service } => {
             let key = vault::unlock_vault(&conn)?;
             match db::get_credential(&conn, &key, &service) {
-                Some((username, password)) => {
+                Some((username, password, notes, url)) => {
                     let password = Zeroizing::new(password);
                     let mut clipboard = Clipboard::new()
                         .map_err(|e| format!("Failed to access clipboard: {e}"))?;
@@ -205,6 +221,12 @@ fn run(cli: Cli) -> Result<(), String> {
 
                     ui::get_service(&service);
                     ui::get_username(&username);
+                    if !url.is_empty() {
+                        ui::get_url(&url);
+                    }
+                    if !notes.is_empty() {
+                        ui::get_notes(&notes);
+                    }
                     ui::clipboard_notice(CLIPBOARD_CLEAR_SECONDS);
                     // Brief pause so the clipboard manager can grab the contents
                     // before the process exits (needed on Linux/Wayland).
@@ -238,14 +260,15 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Edit { service, username: edit_username, password: edit_password } => {
+        Command::Edit { service, username: edit_username, password: edit_password, notes: edit_notes, url: edit_url } => {
             let key = vault::unlock_vault(&conn)?;
 
-            let (current_username, current_password) = db::get_credential(&conn, &key, &service)
-                .ok_or_else(|| format!("No credential found for '{service}'."))?;
+            let (current_username, current_password, current_notes, current_url) =
+                db::get_credential(&conn, &key, &service)
+                    .ok_or_else(|| format!("No credential found for '{service}'."))?;
             let current_password = Zeroizing::new(current_password);
 
-            let neither = !edit_username && !edit_password;
+            let neither = !edit_username && !edit_password && !edit_notes && !edit_url;
             let prompt_username = edit_username || neither;
             let prompt_password = edit_password || neither;
 
@@ -267,7 +290,23 @@ fn run(cli: Cli) -> Result<(), String> {
                 current_password
             };
 
-            if !db::update_credential(&conn, &key, &service, &new_username, &new_password) {
+            let new_notes = if edit_notes {
+                let display = if current_notes.is_empty() { "(none)".to_string() } else { current_notes.clone() };
+                let input = vault::plain_prompt(&format!("Notes [{}]: ", display));
+                if input.is_empty() { current_notes } else { input }
+            } else {
+                current_notes
+            };
+
+            let new_url = if edit_url {
+                let display = if current_url.is_empty() { "(none)".to_string() } else { current_url.clone() };
+                let input = vault::plain_prompt(&format!("URL [{}]: ", display));
+                if input.is_empty() { current_url } else { input }
+            } else {
+                current_url
+            };
+
+            if !db::update_credential(&conn, &key, &service, &new_username, &new_password, &new_notes, &new_url) {
                 return Err(format!("No credential found for '{service}'."));
             }
             ui::success(&format!("Credential for '{service}' updated."));

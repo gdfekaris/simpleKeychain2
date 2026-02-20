@@ -15,6 +15,13 @@ pub(crate) fn prompt(msg: &str) -> String {
     input.trim().to_string()
 }
 
+pub(crate) fn plain_prompt(msg: &str) -> String {
+    ui::plain_input_prompt(msg);
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read input");
+    input.trim().to_string()
+}
+
 pub(crate) fn vault_exists(conn: &Connection) -> bool {
     !db::is_first_run(conn)
 }
@@ -155,9 +162,9 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     drop(stmt);
 
     for (service, nonce, ciphertext) in &rows {
-        let (username, password) = crypto::decrypt(&old_key, service, nonce, ciphertext)
+        let (username, password, notes, url) = crypto::decrypt(&old_key, service, nonce, ciphertext)
             .expect("Data corruption — failed to decrypt credential during password change");
-        let (new_nonce, new_ciphertext) = crypto::encrypt(&new_key, service, &username, &password);
+        let (new_nonce, new_ciphertext) = crypto::encrypt(&new_key, service, &username, &password, &notes, &url);
         tx.execute(
             "UPDATE credentials SET nonce = ?1, ciphertext = ?2 WHERE service = ?3",
             rusqlite::params![new_nonce, new_ciphertext, service],
