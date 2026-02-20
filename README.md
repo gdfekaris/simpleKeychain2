@@ -163,7 +163,7 @@ To find credentials whose password hasn't been changed recently, use `--stale`:
 sk2 list --stale
 ```
 
-This lists every credential not updated within the last 90 days. Credentials that existed before this feature was added (with no recorded timestamp) are always included.
+This lists every credential not updated within the last 90 days.
 
 To use a different threshold:
 
