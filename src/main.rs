@@ -133,6 +133,38 @@ enum Command {
     },
 }
 
+// --- Service resolution (partial-match) ---
+
+fn pick_service(matches: &[String]) -> Result<String, String> {
+    ui::header("No exact match. Close results:");
+    for (i, s) in matches.iter().enumerate() {
+        ui::list_item_pick(i + 1, s);
+    }
+    let input = vault::prompt("Pick a number (or Enter to cancel): ");
+    if input.is_empty() {
+        return Err("Cancelled.".into());
+    }
+    match input.parse::<usize>() {
+        Ok(n) if n >= 1 && n <= matches.len() => Ok(matches[n - 1].clone()),
+        _ => Err(format!("Invalid selection. Enter a number between 1 and {}.", matches.len())),
+    }
+}
+
+fn resolve_service(conn: &Connection, query: &str) -> Result<String, String> {
+    if db::service_exists(conn, query) {
+        return Ok(query.to_string());
+    }
+    let matches = db::find_matching_services(conn, query);
+    match matches.as_slice() {
+        [] => Err(format!("No credential found for '{query}'.")),
+        [single] => {
+            ui::muted(&format!("No exact match — using '{single}'"));
+            Ok(single.clone())
+        }
+        _ => pick_service(&matches),
+    }
+}
+
 // --- Main ---
 
 fn run(cli: Cli) -> Result<(), String> {
@@ -199,6 +231,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Get { service } => {
             let key = vault::unlock_vault(&conn)?;
+            let service = resolve_service(&conn, &service)?;
             match db::get_credential(&conn, &key, &service) {
                 Some((username, password, notes, url, updated_at)) => {
                     let password = Zeroizing::new(password);
@@ -248,6 +281,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Delete { service } => {
             vault::unlock_vault(&conn)?;
+            let service = resolve_service(&conn, &service)?;
             if db::delete_credential(&conn, &service) {
                 ui::success(&format!("Credential for '{service}' deleted."));
             } else {
@@ -302,6 +336,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Edit { service, username: edit_username, password: edit_password, notes: edit_notes, url: edit_url } => {
             let key = vault::unlock_vault(&conn)?;
+            let service = resolve_service(&conn, &service)?;
 
             let (current_username, current_password, current_notes, current_url, _) =
                 db::get_credential(&conn, &key, &service)
@@ -360,6 +395,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
         Command::Rename { old_service, new_service } => {
             let key = vault::unlock_vault(&conn)?;
+            let old_service = resolve_service(&conn, &old_service)?;
             db::rename_credential(&conn, &key, &old_service, &new_service)?;
             ui::success(&format!("Renamed '{old_service}' to '{new_service}'."));
         }

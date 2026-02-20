@@ -102,6 +102,10 @@ pub(crate) fn list_item_stale(item: &str, age: &str) {
     println!("  {} {}  {}", "›".yellow(), item, age.dimmed());
 }
 
+pub(crate) fn list_item_pick(n: usize, item: &str) {
+    println!("  {} {}", format!("[{n}]").yellow().bold(), item.bold());
+}
+
 pub(crate) fn clipboard_notice(seconds: u64) {
     println!("{} {}",
         "○─┤├".blue().dimmed(),

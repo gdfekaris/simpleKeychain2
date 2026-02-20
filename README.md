@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**Version 0.2.5**
+**Version 0.2.6 beta**
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -108,6 +108,8 @@ sk2 get github
 
 Prints the service name, username, and how long ago the password was last set. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
 
+If no exact match is found, sk2 falls back to a case-insensitive substring search. A single match is used automatically; multiple matches are shown as a numbered list to pick from.
+
 ### Edit a credential
 
 ```bash
@@ -150,6 +152,8 @@ sk2 add gmail:work
 ```bash
 sk2 delete github
 ```
+
+Like `get`, partial matching applies if no exact service name is found.
 
 ### List all services
 
