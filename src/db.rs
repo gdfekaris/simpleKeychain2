@@ -203,3 +203,25 @@ pub(crate) fn list_services_with_timestamps(conn: &Connection) -> Vec<(String, O
         .map(|r| r.expect("Failed to read row"))
         .collect()
 }
+
+pub(crate) fn service_exists(conn: &Connection, service: &str) -> bool {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM credentials WHERE service = ?1",
+            rusqlite::params![service],
+            |row| row.get(0),
+        )
+        .expect("Failed to query credentials");
+    count > 0
+}
+
+pub(crate) fn find_matching_services(conn: &Connection, query: &str) -> Vec<String> {
+    let query_lower = query.to_lowercase();
+    let mut stmt = conn
+        .prepare("SELECT service FROM credentials WHERE INSTR(LOWER(service), ?1) > 0 ORDER BY service")
+        .expect("Failed to prepare query");
+    stmt.query_map(rusqlite::params![query_lower], |row| row.get(0))
+        .expect("Failed to query credentials")
+        .map(|r| r.expect("Failed to read row"))
+        .collect()
+}
