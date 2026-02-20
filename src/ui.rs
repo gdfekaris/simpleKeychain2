@@ -95,7 +95,7 @@ pub(crate) fn get_updated_at(ts: Option<i64>) {
             }
         }
     };
-    println!("     {} {}", "Updated:".yellow().bold(), age.bold());
+    println!("     {} {}", "Updated:".yellow().bold(), age);
 }
 
 pub(crate) fn list_item_stale(item: &str, age: &str) {
