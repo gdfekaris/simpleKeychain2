@@ -358,6 +358,7 @@ cargo build --release --no-default-features                     # neither export
 - **File permissions** — On Linux/macOS, `~/.sk2/` is set to `0700` and `vault.db` to `0600` (owner-only access) on every run.
 - **Vault location** — The vault is always stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows), so it works the same regardless of your current directory.
 - **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
+- **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts.
 
 ## Platform Support
 

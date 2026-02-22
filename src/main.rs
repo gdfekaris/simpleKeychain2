@@ -130,6 +130,8 @@ enum Command {
         #[arg(short, long, default_value = "default")]
         charset: crypto::Charset,
     },
+    /// Verify the integrity of all stored credentials
+    Verify,
     /// Change the master password
     ChangePassword,
     /// Export all credentials as a GPG-encrypted CSV file
@@ -497,6 +499,35 @@ fn run(cli: Cli) -> Result<(), String> {
             let old_service = resolve_service(&conn, &old_service)?;
             db::rename_credential(&conn, &key, &old_service, &new_service)?;
             ui::success(&format!("Renamed '{old_service}' to '{new_service}'."));
+        }
+
+        Command::Verify => {
+            let key = vault::unlock_vault(&conn)?;
+            let rows = db::get_all_credentials_raw(&conn);
+            if rows.is_empty() {
+                ui::muted("No credentials stored.");
+            } else {
+                ui::verify_header(rows.len());
+                let mut failed = 0usize;
+                for (service, nonce, ciphertext) in &rows {
+                    match crypto::decrypt(&key, service, nonce, ciphertext) {
+                        Ok(_) => ui::verify_ok(service),
+                        Err(()) => {
+                            ui::verify_fail(service);
+                            failed += 1;
+                        }
+                    }
+                }
+                let ok = rows.len() - failed;
+                if failed == 0 {
+                    ui::success(&format!("All {} credentials verified successfully.", rows.len()));
+                } else {
+                    return Err(format!(
+                        "{ok} of {} credentials verified. {failed} failed — vault may be corrupt.",
+                        rows.len()
+                    ));
+                }
+            }
         }
 
         Command::ChangePassword => {

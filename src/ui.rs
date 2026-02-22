@@ -117,6 +117,18 @@ pub(crate) fn muted(msg: &str) {
     println!("{}", msg.dimmed());
 }
 
+pub(crate) fn verify_header(total: usize) {
+    println!("{}", format!("Verifying {total} credentials...").yellow().bold());
+}
+
+pub(crate) fn verify_ok(service: &str) {
+    println!("  {} {}", "✓".green().bold(), service);
+}
+
+pub(crate) fn verify_fail(service: &str) {
+    println!("  {} {}", "✗".red().bold(), service);
+}
+
 pub(crate) fn password_strength(entropy: f64) {
     let bits = format!("{entropy:.0} bits");
     if entropy < 40.0 {
