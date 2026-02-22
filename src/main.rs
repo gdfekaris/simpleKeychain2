@@ -292,6 +292,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 if p.is_empty() {
                     return Err("Password cannot be empty.".into());
                 }
+                ui::password_strength(crypto::password_entropy(&p));
                 p
             };
 
@@ -462,6 +463,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     current_password
                 } else {
                     password_was_changed = true;
+                    ui::password_strength(crypto::password_entropy(&input));
                     input
                 }
             } else {

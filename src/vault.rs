@@ -133,6 +133,7 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     if new_password.is_empty() {
         return Err("Password cannot be empty.".into());
     }
+    ui::password_strength(crypto::password_entropy(&new_password));
     ui::password_prompt("Confirm new master password: ");
     let confirm = Zeroizing::new(
         rpassword::read_password_from_tty(None)
