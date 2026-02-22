@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**Version 0.2.7**
+**Version 0.2.8**
 =======
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
@@ -100,6 +100,26 @@ sk2 add github --generate --charset dna            # A, C, G, T
 ```
 
 The default charset (`default`) uses letters, digits, and symbols. For small character sets like `hex` or `dna`, consider increasing `--length` to maintain adequate entropy — sk2 will warn you if generated entropy falls below 64 bits.
+
+### Generate a password without storing it
+
+```bash
+sk2 generate
+```
+
+Generates a random password and prints it to your terminal. Unlike `add --generate`, nothing is stored — no vault access or master password is required.
+
+> **Security note:** Because the password is printed directly to your terminal, it will be visible in your terminal scroll-back history. Only use `generate` for throwaway passwords. To generate and store a password without it ever appearing on screen, use `sk2 add --generate` instead.
+
+The same length and character set options from `add --generate` are available:
+
+```bash
+sk2 generate --length 24
+sk2 generate --charset alphanumeric
+sk2 generate --length 32 --charset websafe
+```
+
+The generated password is also copied to your clipboard and cleared after 10 seconds.
 
 ### Retrieve a credential
 
@@ -304,6 +324,8 @@ GPG will prompt for the passphrase used when the file was exported. You'll then 
 
 If a service in the CSV already exists in your vault, it will be silently overwritten. Services not mentioned in the CSV are left untouched.
 
+Import can also be used to recover individual corrupt credentials found by `sk2 verify` — you don't need to wipe the vault first. Run `sk2 import <backup.csv.gpg>` against your live vault and only the affected credentials will be overwritten.
+
 ### Round-trip example
 
 ```bash
@@ -337,6 +359,8 @@ cargo build --release --no-default-features                     # neither export
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
 - **File permissions** — On Linux/macOS, `~/.sk2/` is set to `0700` and `vault.db` to `0600` (owner-only access) on every run.
 - **Vault location** — The vault is always stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows), so it works the same regardless of your current directory.
+- **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
+- **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts. If a credential fails: restore it from a backup with `sk2 import`, or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
 
 ## Platform Support
 

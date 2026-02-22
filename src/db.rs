@@ -215,6 +215,16 @@ pub(crate) fn service_exists(conn: &Connection, service: &str) -> bool {
     count > 0
 }
 
+pub(crate) fn get_all_credentials_raw(conn: &Connection) -> Vec<(String, Vec<u8>, Vec<u8>)> {
+    let mut stmt = conn
+        .prepare("SELECT service, nonce, ciphertext FROM credentials ORDER BY service")
+        .expect("Failed to prepare query");
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .expect("Failed to query credentials")
+        .map(|r| r.expect("Failed to read row"))
+        .collect()
+}
+
 pub(crate) fn find_matching_services(conn: &Connection, query: &str) -> Vec<String> {
     let query_lower = query.to_lowercase();
     let mut stmt = conn
