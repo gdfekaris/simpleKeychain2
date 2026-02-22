@@ -121,6 +121,15 @@ enum Command {
         /// The new service name
         new_service: String,
     },
+    /// Generate a random password without storing it
+    Generate {
+        /// Length of the generated password (default: 16, range: 4–64)
+        #[arg(short, long, default_value_t = 16)]
+        length: usize,
+        /// Character set to use when generating a password
+        #[arg(short, long, default_value = "default")]
+        charset: crypto::Charset,
+    },
     /// Change the master password
     ChangePassword,
     /// Export all credentials as a GPG-encrypted CSV file
@@ -170,10 +179,69 @@ fn resolve_service(conn: &Connection, query: &str) -> Result<String, String> {
     }
 }
 
+// --- Generate (no vault) ---
+
+fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String> {
+    if !(4..=64).contains(&length) {
+        return Err("Password length must be between 4 and 64.".into());
+    }
+    let alphabet_size = match charset {
+        crypto::Charset::Default      => 74.0_f64,
+        crypto::Charset::Alphanumeric => 62.0,
+        crypto::Charset::Websafe      => 66.0,
+        crypto::Charset::Hex          => 16.0,
+        crypto::Charset::Dna          => 4.0,
+    };
+    let entropy_bits = length as f64 * alphabet_size.log2();
+    if entropy_bits < 64.0 {
+        ui::warning(&format!(
+            "Low entropy: ~{:.0} bits. Consider increasing --length.",
+            entropy_bits
+        ));
+    }
+
+    let password = crypto::generate_password(length, &charset);
+
+    ui::generate_warning();
+    ui::generated_password(&password);
+
+    let mut clipboard = Clipboard::new()
+        .map_err(|e| format!("Failed to access clipboard: {e}"))?;
+    clipboard.set_text(password.as_str())
+        .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
+
+    match std::env::current_exe() {
+        Ok(exe) => {
+            let result = process::Command::new(exe)
+                .arg("--clear-clipboard")
+                .arg(CLIPBOARD_CLEAR_SECONDS.to_string())
+                .stdin(process::Stdio::null())
+                .stdout(process::Stdio::null())
+                .stderr(process::Stdio::null())
+                .spawn();
+            if let Err(e) = result {
+                ui::warning(&format!("Could not spawn clipboard-clear process: {e}"));
+            }
+        }
+        Err(e) => {
+            ui::warning(&format!("Could not determine executable path: {e}"));
+        }
+    }
+
+    ui::clipboard_notice("Password:", CLIPBOARD_CLEAR_SECONDS);
+    thread::sleep(Duration::from_millis(100));
+    Ok(())
+}
+
 // --- Main ---
 
 fn run(cli: Cli) -> Result<(), String> {
     let command = cli.command.ok_or("No command provided. Run with --help for usage.")?;
+
+    // Generate needs no vault access — exit before vault_path() is ever called.
+    if let Command::Generate { length, charset } = command {
+        return handle_generate(length, charset);
+    }
 
     let db_path = vault_path();
     let conn = Connection::open(&db_path).expect("Failed to open database");
@@ -181,6 +249,7 @@ fn run(cli: Cli) -> Result<(), String> {
     db::init_db(&conn);
 
     match command {
+        Command::Generate { .. } => unreachable!(),
         Command::Init => {
             vault::init_vault(&conn)?;
         }

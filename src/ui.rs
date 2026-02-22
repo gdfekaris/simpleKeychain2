@@ -117,6 +117,17 @@ pub(crate) fn muted(msg: &str) {
     println!("{}", msg.dimmed());
 }
 
+pub(crate) fn generate_warning() {
+    eprintln!("{} This password is visible in your terminal. Only use {} for throwaway passwords.",
+        "[!]".yellow().bold(),
+        "generate".bold(),
+    );
+}
+
+pub(crate) fn generated_password(pw: &str) {
+    println!("     {} {}", "Password:".yellow().bold(), pw.bold());
+}
+
 #[cfg(any(feature = "export", feature = "import"))]
 pub(crate) fn reminder(msg: &str) {
     println!("{}", msg.yellow().bold());

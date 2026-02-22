@@ -101,6 +101,26 @@ sk2 add github --generate --charset dna            # A, C, G, T
 
 The default charset (`default`) uses letters, digits, and symbols. For small character sets like `hex` or `dna`, consider increasing `--length` to maintain adequate entropy — sk2 will warn you if generated entropy falls below 64 bits.
 
+### Generate a password without storing it
+
+```bash
+sk2 generate
+```
+
+Generates a random password and prints it to your terminal. Unlike `add --generate`, nothing is stored — no vault access or master password is required.
+
+> **Security note:** Because the password is printed directly to your terminal, it will be visible in your terminal scroll-back history. Only use `generate` for throwaway passwords. To generate and store a password without it ever appearing on screen, use `sk2 add --generate` instead.
+
+The same length and character set options from `add --generate` are available:
+
+```bash
+sk2 generate --length 24
+sk2 generate --charset alphanumeric
+sk2 generate --length 32 --charset websafe
+```
+
+The generated password is also copied to your clipboard and cleared after 10 seconds.
+
 ### Retrieve a credential
 
 ```bash
