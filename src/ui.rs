@@ -117,6 +117,42 @@ pub(crate) fn muted(msg: &str) {
     println!("{}", msg.dimmed());
 }
 
+pub(crate) fn verify_header(total: usize) {
+    println!("{}", format!("Verifying {total} credentials...").yellow().bold());
+}
+
+pub(crate) fn verify_ok(service: &str) {
+    println!("  {} {}", "✓".green().bold(), service);
+}
+
+pub(crate) fn verify_fail(service: &str) {
+    println!("  {} {}", "✗".red().bold(), service);
+}
+
+pub(crate) fn password_strength(entropy: f64) {
+    let bits = format!("{entropy:.0} bits");
+    if entropy < 40.0 {
+        eprintln!("     Strength: {} (Weak)", bits.red().bold());
+    } else if entropy < 64.0 {
+        eprintln!("     Strength: {} (Fair)", bits.yellow().bold());
+    } else if entropy < 80.0 {
+        eprintln!("     Strength: {} (Strong)", bits.green().bold());
+    } else {
+        eprintln!("     Strength: {} (Very strong)", bits.green().bold());
+    }
+}
+
+pub(crate) fn generate_warning() {
+    eprintln!("{} This password is visible in your terminal. Only use {} for throwaway passwords.",
+        "[!]".yellow().bold(),
+        "generate".bold(),
+    );
+}
+
+pub(crate) fn generated_password(pw: &str) {
+    println!("     {} {}", "Password:".yellow().bold(), pw.bold());
+}
+
 #[cfg(any(feature = "export", feature = "import"))]
 pub(crate) fn reminder(msg: &str) {
     println!("{}", msg.yellow().bold());

@@ -58,6 +58,29 @@ pub(crate) fn generate_password(length: usize, charset: &Charset) -> Zeroizing<S
     Zeroizing::new(password)
 }
 
+pub(crate) fn password_entropy(password: &str) -> f64 {
+    if password.is_empty() {
+        return 0.0;
+    }
+    let mut has_lower = false;
+    let mut has_upper = false;
+    let mut has_digit = false;
+    let mut has_other = false;
+    for c in password.chars() {
+        if c.is_ascii_lowercase()      { has_lower = true; }
+        else if c.is_ascii_uppercase() { has_upper = true; }
+        else if c.is_ascii_digit()     { has_digit = true; }
+        else                           { has_other = true; }
+    }
+    let mut alphabet = 0u32;
+    if has_lower { alphabet += 26; }
+    if has_upper { alphabet += 26; }
+    if has_digit { alphabet += 10; }
+    if has_other { alphabet += 32; }
+    if alphabet == 0 { return 0.0; }
+    password.len() as f64 * (alphabet as f64).log2()
+}
+
 pub(crate) fn encrypt_raw(key: &[u8; KEY_LEN], plaintext: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce_bytes = [0u8; 24];
