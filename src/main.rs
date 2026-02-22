@@ -522,6 +522,8 @@ fn run(cli: Cli) -> Result<(), String> {
                 if failed == 0 {
                     ui::success(&format!("All {} credentials verified successfully.", rows.len()));
                 } else {
+                    ui::warning("If you have a backup: run 'sk2 import <backup.csv.gpg>' to restore the affected credential(s).");
+                    ui::warning("No backup: run 'sk2 delete <service>' and reset the password on the affected site(s).");
                     return Err(format!(
                         "{ok} of {} credentials verified. {failed} failed — vault may be corrupt.",
                         rows.len()
