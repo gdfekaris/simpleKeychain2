@@ -9,7 +9,7 @@ A lightweight, local-only CLI password manager. No servers, no sync, no network.
 - Your master password is run through **Argon2id** to derive a 256-bit encryption key.
 - Each credential (username + password) is encrypted with **XChaCha20-Poly1305** using a unique random nonce.
 - The service name is bound as **authenticated associated data (AAD)**, preventing ciphertext from being swapped between database rows.
-- Everything is stored in a local **SQLite** database (`~/.sk2/vault.db`).
+- Everything is stored in a local **SQLite** database (`~/.sk2/vault.db` by default).
 
 ## Installation
 
@@ -222,6 +222,25 @@ Re-encrypts all stored credentials under the new password. The vault remains int
 
 All commands require your master password.
 
+### Custom vault path
+
+By default, sk2 stores the vault at `~/.sk2/vault.db`. To use a different location, set the `SK2_VAULT` environment variable or pass the `--vault` flag (the flag takes precedence).
+
+```bash
+# Using the environment variable
+export SK2_VAULT=~/vaults/work.db
+sk2 init
+sk2 add github
+
+# Using the flag
+sk2 --vault ~/vaults/personal.db list
+
+# One-off override
+SK2_VAULT=~/vaults/work.db sk2 list
+```
+
+This is useful for maintaining separate vaults (work vs. personal), scripting, or non-standard home directory setups. Parent directories are created automatically.
+
 ## Creating Backups
 
 sk2 can export all your credentials into a GPG-encrypted CSV file. The plaintext is never written to disk — it is piped directly from sk2 to GPG in memory.
@@ -357,7 +376,7 @@ cargo build --release --no-default-features                     # neither export
 - **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory when no longer needed, including on error paths (e.g. wrong password, empty input).
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
 - **File permissions** — On Linux/macOS, `~/.sk2/` is set to `0700` and `vault.db` to `0600` (owner-only access) on every run.
-- **Vault location** — The vault is always stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows), so it works the same regardless of your current directory.
+- **Vault location** — By default, the vault is stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). Override with `--vault` or the `SK2_VAULT` environment variable (flag takes precedence). Parent directories are created automatically.
 - **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
 - **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts. If a credential fails: restore it from a backup with `sk2 import`, or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
 
