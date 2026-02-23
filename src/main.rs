@@ -426,6 +426,7 @@ fn run(cli: Cli) -> Result<(), String> {
                             });
                             ui::list_item_stale(service, &age);
                         }
+                        ui::list_count(stale_entries.len());
                     }
                 }
             } else {
@@ -448,6 +449,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     for s in &services {
                         ui::list_item(s);
                     }
+                    ui::list_count(services.len());
                 }
             }
         }
