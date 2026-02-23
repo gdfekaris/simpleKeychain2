@@ -98,6 +98,11 @@ pub(crate) fn get_updated_at(ts: Option<i64>) {
     println!("     {} {}", "Updated:".yellow().bold(), age);
 }
 
+pub(crate) fn list_count(n: usize) {
+    let label = if n == 1 { "credential" } else { "credentials" };
+    println!("{}", format!("{n} {label}").dimmed());
+}
+
 pub(crate) fn list_item_stale(item: &str, age: &str) {
     println!("  {} {}  {}", "›".yellow(), item, age.dimmed());
 }

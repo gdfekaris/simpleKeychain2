@@ -28,12 +28,25 @@ use zeroize::Zeroizing;
 
 use constants::*;
 
-fn vault_path() -> std::path::PathBuf {
-    let dir = dirs::home_dir()
-        .expect("Could not determine home directory")
-        .join(".sk2");
-    std::fs::create_dir_all(&dir).expect("Failed to create vault directory");
-    dir.join("vault.db")
+fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
+    let path = if let Some(p) = cli_override {
+        std::path::PathBuf::from(p)
+    } else if let Ok(p) = std::env::var("SK2_VAULT") {
+        std::path::PathBuf::from(p)
+    } else {
+        let dir = dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(".sk2");
+        std::fs::create_dir_all(&dir).expect("Failed to create vault directory");
+        return dir.join("vault.db");
+    };
+
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).expect("Failed to create vault directory");
+    }
+    path
 }
 
 #[derive(Parser)]
@@ -41,6 +54,10 @@ fn vault_path() -> std::path::PathBuf {
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// Path to the vault database file (overrides SK2_VAULT env var)
+    #[arg(long, global = true)]
+    vault: Option<String>,
 
     /// Internal: clear clipboard after N seconds (used by spawned child)
     #[arg(long = "clear-clipboard", hide = true)]
@@ -238,6 +255,7 @@ fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String
 // --- Main ---
 
 fn run(cli: Cli) -> Result<(), String> {
+    let vault_arg = cli.vault;
     let command = cli.command.ok_or("No command provided. Run with --help for usage.")?;
 
     // Generate needs no vault access — exit before vault_path() is ever called.
@@ -245,7 +263,7 @@ fn run(cli: Cli) -> Result<(), String> {
         return handle_generate(length, charset);
     }
 
-    let db_path = vault_path();
+    let db_path = vault_path(vault_arg.as_deref());
     let conn = Connection::open(&db_path).expect("Failed to open database");
     vault::restrict_db_permissions(&db_path);
     db::init_db(&conn);
@@ -408,6 +426,7 @@ fn run(cli: Cli) -> Result<(), String> {
                             });
                             ui::list_item_stale(service, &age);
                         }
+                        ui::list_count(stale_entries.len());
                     }
                 }
             } else {
@@ -430,6 +449,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     for s in &services {
                         ui::list_item(s);
                     }
+                    ui::list_count(services.len());
                 }
             }
         }
