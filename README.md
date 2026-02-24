@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-## Version 1.0
+## Version 1.0.0
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -16,7 +16,7 @@ A lightweight, local-only CLI password manager. No servers, no sync, no network.
 Requires [Rust](https://www.rust-lang.org/tools/install) (1.85+).
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/gdfekaris/simpleKeychain2.git
 cd sk2-dev
 cargo build --release
 ```
