@@ -3,6 +3,7 @@ name = "simpleKeychain2"
 version = "1.0.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/gdfekaris/simpleKeychain2"
 
 [features]
 default = ["export", "import"]
