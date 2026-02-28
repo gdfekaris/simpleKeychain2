@@ -380,6 +380,24 @@ cargo build --release --no-default-features                     # neither export
 - **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
 - **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts. If a credential fails: restore it from a backup with `sk2 import`, or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
 
+## Testing
+
+Unit tests cover the cryptography, database, and CSV parsing modules. No external dependencies or vault setup required.
+
+```bash
+cargo test                         # all tests (default features)
+cargo test --no-default-features   # without export/import
+```
+
+To run tests for a specific module:
+
+```bash
+cargo test crypto::tests
+cargo test db::tests
+cargo test import::tests
+cargo test export::tests
+```
+
 ## Platform Support
 
 Works on **Linux**, **macOS**, and **Windows**. Clipboard support is provided by [arboard](https://github.com/1Password/arboard) (maintained by 1Password).
