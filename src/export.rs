@@ -23,7 +23,11 @@ fn restrict_file_permissions(path: &std::path::Path) {
     }
 }
 
-pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output: &str) -> Result<(), String> {
+pub(crate) fn export_credentials(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    output: &str,
+) -> Result<(), String> {
     // Check that GPG is available
     let gpg_check = process::Command::new("gpg")
         .arg("--version")
@@ -32,7 +36,11 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
         .status();
     match gpg_check {
         Ok(status) if status.success() => {}
-        _ => return Err("GPG is not installed or not found in PATH. Install GPG to use export.".into()),
+        _ => {
+            return Err(
+                "GPG is not installed or not found in PATH. Install GPG to use export.".into(),
+            );
+        }
     }
 
     let services = db::list_services(conn);
@@ -71,7 +79,9 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
                 csv.push('\n');
             }
             None => {
-                ui::warning(&format!("Could not decrypt credential for '{service}', skipping."));
+                ui::warning(&format!(
+                    "Could not decrypt credential for '{service}', skipping."
+                ));
             }
         }
     }
@@ -90,12 +100,15 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
 
     // Pipe CSV to GPG's stdin
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(csv.as_bytes())
+        stdin
+            .write_all(csv.as_bytes())
             .map_err(|e| format!("Failed to write to GPG: {e}"))?;
         // stdin is dropped here, closing the pipe
     }
 
-    let status = child.wait().map_err(|e| format!("Failed to wait for GPG: {e}"))?;
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for GPG: {e}"))?;
     if !status.success() {
         return Err("GPG encryption failed.".into());
     }

@@ -1,6 +1,6 @@
-use argon2::{Argon2, Algorithm, Version, Params};
-use chacha20poly1305::{XChaCha20Poly1305, XNonce, Key};
+use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
+use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
@@ -45,11 +45,13 @@ pub(crate) enum Charset {
 
 pub(crate) fn generate_password(length: usize, charset: &Charset) -> Zeroizing<String> {
     let chars: &[u8] = match charset {
-        Charset::Default      => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?",
+        Charset::Default => {
+            b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?"
+        }
         Charset::Alphanumeric => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-        Charset::Websafe      => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~",
-        Charset::Hex          => b"0123456789abcdef",
-        Charset::Dna          => b"ACGT",
+        Charset::Websafe => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~",
+        Charset::Hex => b"0123456789abcdef",
+        Charset::Dna => b"ACGT",
     };
     let mut rng = rand::thread_rng();
     let password: String = (0..length)
@@ -67,17 +69,32 @@ pub(crate) fn password_entropy(password: &str) -> f64 {
     let mut has_digit = false;
     let mut has_other = false;
     for c in password.chars() {
-        if c.is_ascii_lowercase()      { has_lower = true; }
-        else if c.is_ascii_uppercase() { has_upper = true; }
-        else if c.is_ascii_digit()     { has_digit = true; }
-        else                           { has_other = true; }
+        if c.is_ascii_lowercase() {
+            has_lower = true;
+        } else if c.is_ascii_uppercase() {
+            has_upper = true;
+        } else if c.is_ascii_digit() {
+            has_digit = true;
+        } else {
+            has_other = true;
+        }
     }
     let mut alphabet = 0u32;
-    if has_lower { alphabet += 26; }
-    if has_upper { alphabet += 26; }
-    if has_digit { alphabet += 10; }
-    if has_other { alphabet += 32; }
-    if alphabet == 0 { return 0.0; }
+    if has_lower {
+        alphabet += 26;
+    }
+    if has_upper {
+        alphabet += 26;
+    }
+    if has_digit {
+        alphabet += 10;
+    }
+    if has_other {
+        alphabet += 32;
+    }
+    if alphabet == 0 {
+        return 0.0;
+    }
     password.len() as f64 * (alphabet as f64).log2()
 }
 
@@ -90,7 +107,11 @@ pub(crate) fn encrypt_raw(key: &[u8; KEY_LEN], plaintext: &[u8]) -> (Vec<u8>, Ve
     (nonce_bytes.to_vec(), ciphertext)
 }
 
-pub(crate) fn decrypt_raw(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, ()> {
+pub(crate) fn decrypt_raw(
+    key: &[u8; KEY_LEN],
+    nonce: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, ()> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = XNonce::from_slice(nonce);
     cipher.decrypt(nonce, ciphertext).map_err(|_| ())
@@ -103,12 +124,27 @@ pub(crate) fn verify_key(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -
     }
 }
 
-pub(crate) fn encrypt(key: &[u8; KEY_LEN], service: &str, username: &str, password: &str, notes: &str, url: &str) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn encrypt(
+    key: &[u8; KEY_LEN],
+    service: &str,
+    username: &str,
+    password: &str,
+    notes: &str,
+    url: &str,
+) -> (Vec<u8>, Vec<u8>) {
     let cred = Credential {
         username: username.to_string(),
         password: password.to_string(),
-        notes: if notes.is_empty() { None } else { Some(notes.to_string()) },
-        url: if url.is_empty() { None } else { Some(url.to_string()) },
+        notes: if notes.is_empty() {
+            None
+        } else {
+            Some(notes.to_string())
+        },
+        url: if url.is_empty() {
+            None
+        } else {
+            Some(url.to_string())
+        },
     };
     let plaintext = serde_json::to_vec(&cred).expect("Failed to serialize credential");
 
@@ -117,24 +153,38 @@ pub(crate) fn encrypt(key: &[u8; KEY_LEN], service: &str, username: &str, passwo
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from_slice(&nonce_bytes);
 
-    let ciphertext = cipher.encrypt(nonce, Payload {
-        msg: plaintext.as_ref(),
-        aad: service.as_bytes(),
-    }).expect("Encryption failed");
+    let ciphertext = cipher
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext.as_ref(),
+                aad: service.as_bytes(),
+            },
+        )
+        .expect("Encryption failed");
     (nonce_bytes.to_vec(), ciphertext)
 }
 
-pub(crate) fn decrypt(key: &[u8; KEY_LEN], service: &str, nonce: &[u8], ciphertext: &[u8]) -> Result<(String, String, String, String), ()> {
+pub(crate) fn decrypt(
+    key: &[u8; KEY_LEN],
+    service: &str,
+    nonce: &[u8],
+    ciphertext: &[u8],
+) -> Result<(String, String, String, String), ()> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = XNonce::from_slice(nonce);
 
-    let plaintext = cipher.decrypt(nonce, Payload {
-        msg: ciphertext,
-        aad: service.as_bytes(),
-    }).map_err(|_| ())?;
+    let plaintext = cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext,
+                aad: service.as_bytes(),
+            },
+        )
+        .map_err(|_| ())?;
 
-    let cred: Credential =
-        serde_json::from_slice(&plaintext).map_err(|_| ())?;
+    let cred: Credential = serde_json::from_slice(&plaintext).map_err(|_| ())?;
     Ok((
         cred.username,
         cred.password,
@@ -148,10 +198,9 @@ mod tests {
     use super::*;
 
     const TEST_KEY: [u8; KEY_LEN] = [
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-        0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+        0x1f, 0x20,
     ];
     const WRONG_KEY: [u8; KEY_LEN] = [0xff; KEY_LEN];
 
@@ -228,7 +277,14 @@ mod tests {
 
     #[test]
     fn aad_roundtrip() {
-        let (nonce, ct) = encrypt(&TEST_KEY, "github", "user", "pass", "my notes", "https://github.com");
+        let (nonce, ct) = encrypt(
+            &TEST_KEY,
+            "github",
+            "user",
+            "pass",
+            "my notes",
+            "https://github.com",
+        );
         let (u, p, n, url) = decrypt(&TEST_KEY, "github", &nonce, &ct).unwrap();
         assert_eq!(u, "user");
         assert_eq!(p, "pass");
@@ -277,7 +333,8 @@ mod tests {
 
     #[test]
     fn generate_default_charset() {
-        let valid: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?";
+        let valid: &[u8] =
+            b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?";
         let pw = generate_password(200, &Charset::Default);
         for c in pw.bytes() {
             assert!(valid.contains(&c), "unexpected char: {}", c as char);
@@ -342,7 +399,14 @@ mod tests {
 
     #[test]
     fn unicode_credential_fields() {
-        let (nonce, ct) = encrypt(&TEST_KEY, "日本語", "用户名", "密码🔑", "笔记📝", "https://例え.jp");
+        let (nonce, ct) = encrypt(
+            &TEST_KEY,
+            "日本語",
+            "用户名",
+            "密码🔑",
+            "笔记📝",
+            "https://例え.jp",
+        );
         let (u, p, n, url) = decrypt(&TEST_KEY, "日本語", &nonce, &ct).unwrap();
         assert_eq!(u, "用户名");
         assert_eq!(p, "密码🔑");

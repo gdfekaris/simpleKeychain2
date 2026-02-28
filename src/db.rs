@@ -39,7 +39,12 @@ pub(crate) fn is_first_run(conn: &Connection) -> bool {
     count == 0
 }
 
-pub(crate) fn store_metadata(conn: &Connection, salt: &[u8], verify_nonce: &[u8], verify_ciphertext: &[u8]) {
+pub(crate) fn store_metadata(
+    conn: &Connection,
+    salt: &[u8],
+    verify_nonce: &[u8],
+    verify_ciphertext: &[u8],
+) {
     conn.execute(
         "INSERT INTO metadata (id, salt, time_cost, memory_cost, parallelism, verify_nonce, verify_ciphertext)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
@@ -68,7 +73,15 @@ pub(crate) fn load_verify_token(conn: &Connection) -> (Vec<u8>, Vec<u8>) {
     .expect("Failed to load verify token")
 }
 
-pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str, username: &str, password: &str, notes: &str, url: &str) {
+pub(crate) fn add_credential(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    service: &str,
+    username: &str,
+    password: &str,
+    notes: &str,
+    url: &str,
+) {
     let (nonce, ciphertext) = crypto::encrypt(key, service, username, password, notes, url);
     conn.execute(
         "INSERT OR REPLACE INTO credentials (service, nonce, ciphertext, updated_at)
@@ -78,7 +91,11 @@ pub(crate) fn add_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &s
     .expect("Failed to store credential");
 }
 
-pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &str) -> Option<(String, String, String, String, Option<i64>)> {
+pub(crate) fn get_credential(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    service: &str,
+) -> Option<(String, String, String, String, Option<i64>)> {
     let result = conn.query_row(
         "SELECT nonce, ciphertext, updated_at FROM credentials WHERE service = ?1",
         rusqlite::params![service],
@@ -92,8 +109,9 @@ pub(crate) fn get_credential(conn: &Connection, key: &[u8; KEY_LEN], service: &s
 
     match result {
         Ok((nonce, ciphertext, updated_at)) => {
-            let (username, password, notes, url) = crypto::decrypt(key, service, &nonce, &ciphertext)
-                .expect("Data corruption — failed to decrypt credential");
+            let (username, password, notes, url) =
+                crypto::decrypt(key, service, &nonce, &ciphertext)
+                    .expect("Data corruption — failed to decrypt credential");
             Some((username, password, notes, url, updated_at))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => None,
@@ -138,7 +156,12 @@ pub(crate) fn update_credential(
     rows > 0
 }
 
-pub(crate) fn rename_credential(conn: &Connection, key: &[u8; KEY_LEN], old_service: &str, new_service: &str) -> Result<(), String> {
+pub(crate) fn rename_credential(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    old_service: &str,
+    new_service: &str,
+) -> Result<(), String> {
     let exists: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM credentials WHERE service = ?1",
@@ -172,7 +195,8 @@ pub(crate) fn rename_credential(conn: &Connection, key: &[u8; KEY_LEN], old_serv
     let (username, password, notes, url) = crypto::decrypt(key, old_service, &nonce, &ciphertext)
         .expect("Data corruption — failed to decrypt credential");
 
-    let (new_nonce, new_ciphertext) = crypto::encrypt(key, new_service, &username, &password, &notes, &url);
+    let (new_nonce, new_ciphertext) =
+        crypto::encrypt(key, new_service, &username, &password, &notes, &url);
 
     conn.execute(
         "UPDATE credentials SET service = ?1, nonce = ?2, ciphertext = ?3, updated_at = ?4 WHERE service = ?5",
@@ -228,7 +252,9 @@ pub(crate) fn get_all_credentials_raw(conn: &Connection) -> Vec<(String, Vec<u8>
 pub(crate) fn find_matching_services(conn: &Connection, query: &str) -> Vec<String> {
     let query_lower = query.to_lowercase();
     let mut stmt = conn
-        .prepare("SELECT service FROM credentials WHERE INSTR(LOWER(service), ?1) > 0 ORDER BY service")
+        .prepare(
+            "SELECT service FROM credentials WHERE INSTR(LOWER(service), ?1) > 0 ORDER BY service",
+        )
         .expect("Failed to prepare query");
     stmt.query_map(rusqlite::params![query_lower], |row| row.get(0))
         .expect("Failed to query credentials")
@@ -241,10 +267,9 @@ mod tests {
     use super::*;
 
     const TEST_KEY: [u8; KEY_LEN] = [
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-        0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+        0x1f, 0x20,
     ];
 
     fn setup() -> Connection {
@@ -299,7 +324,15 @@ mod tests {
     #[test]
     fn add_get_roundtrip() {
         let conn = setup();
-        add_credential(&conn, &TEST_KEY, "github", "user", "pass123", "notes", "https://github.com");
+        add_credential(
+            &conn,
+            &TEST_KEY,
+            "github",
+            "user",
+            "pass123",
+            "notes",
+            "https://github.com",
+        );
         let (u, p, n, url, ts) = get_credential(&conn, &TEST_KEY, "github").unwrap();
         assert_eq!(u, "user");
         assert_eq!(p, "pass123");
@@ -342,7 +375,9 @@ mod tests {
     fn update_existing() {
         let conn = setup();
         add_credential(&conn, &TEST_KEY, "svc", "u1", "p1", "", "");
-        assert!(update_credential(&conn, &TEST_KEY, "svc", "u2", "p2", "notes", "url", true));
+        assert!(update_credential(
+            &conn, &TEST_KEY, "svc", "u2", "p2", "notes", "url", true
+        ));
         let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap();
         assert_eq!(u, "u2");
         assert_eq!(p, "p2");
@@ -353,7 +388,9 @@ mod tests {
     #[test]
     fn update_nonexistent() {
         let conn = setup();
-        assert!(!update_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "", true));
+        assert!(!update_credential(
+            &conn, &TEST_KEY, "svc", "u", "p", "", "", true
+        ));
     }
 
     #[test]
@@ -490,7 +527,15 @@ mod tests {
     #[test]
     fn unicode_service_names() {
         let conn = setup();
-        add_credential(&conn, &TEST_KEY, "日本語サービス", "ユーザー", "パスワード", "", "");
+        add_credential(
+            &conn,
+            &TEST_KEY,
+            "日本語サービス",
+            "ユーザー",
+            "パスワード",
+            "",
+            "",
+        );
         assert!(service_exists(&conn, "日本語サービス"));
         let (u, _, _, _, _) = get_credential(&conn, &TEST_KEY, "日本語サービス").unwrap();
         assert_eq!(u, "ユーザー");
