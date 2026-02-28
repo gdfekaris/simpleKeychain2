@@ -11,14 +11,18 @@ use crate::ui;
 pub(crate) fn prompt(msg: &str) -> String {
     ui::input_prompt(msg);
     let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("Failed to read input");
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read input");
     input.trim().to_string()
 }
 
 pub(crate) fn plain_prompt(msg: &str) -> String {
     ui::plain_input_prompt(msg);
     let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("Failed to read input");
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read input");
     input.trim().to_string()
 }
 
@@ -33,18 +37,18 @@ fn require_vault(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn restrict_db_permissions(path: &std::path::Path) {
+pub(crate) fn restrict_db_permissions(_path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = _path.parent() {
             let dir_perms = std::fs::Permissions::from_mode(0o700);
             if let Err(e) = std::fs::set_permissions(parent, dir_perms) {
                 ui::warning(&format!("Could not set directory permissions: {e}"));
             }
         }
         let file_perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(path, file_perms) {
+        if let Err(e) = std::fs::set_permissions(_path, file_perms) {
             ui::warning(&format!("Could not set database permissions: {e}"));
         }
     }
@@ -52,10 +56,8 @@ pub(crate) fn restrict_db_permissions(path: &std::path::Path) {
 
 fn read_master_password() -> Result<Zeroizing<String>, String> {
     ui::password_prompt("Master password: ");
-    let password = Zeroizing::new(
-        rpassword::read_password_from_tty(None)
-            .expect("Failed to read password"),
-    );
+    let password =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
 
     if password.is_empty() {
         return Err("Password cannot be empty.".into());
@@ -70,20 +72,16 @@ pub(crate) fn init_vault(conn: &Connection) -> Result<(), String> {
     }
 
     ui::password_prompt("Set master password: ");
-    let password = Zeroizing::new(
-        rpassword::read_password_from_tty(None)
-            .expect("Failed to read password"),
-    );
+    let password =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
 
     if password.is_empty() {
         return Err("Password cannot be empty.".into());
     }
 
     ui::password_prompt("Confirm master password: ");
-    let confirm = Zeroizing::new(
-        rpassword::read_password_from_tty(None)
-            .expect("Failed to read password"),
-    );
+    let confirm =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
 
     if password != confirm {
         return Err("Passwords do not match.".into());
@@ -126,19 +124,15 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     }
 
     ui::password_prompt("New master password: ");
-    let new_password = Zeroizing::new(
-        rpassword::read_password_from_tty(None)
-            .expect("Failed to read password"),
-    );
+    let new_password =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
     if new_password.is_empty() {
         return Err("Password cannot be empty.".into());
     }
     ui::password_strength(crypto::password_entropy(&new_password));
     ui::password_prompt("Confirm new master password: ");
-    let confirm = Zeroizing::new(
-        rpassword::read_password_from_tty(None)
-            .expect("Failed to read password"),
-    );
+    let confirm =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
     if new_password != confirm {
         return Err("Passwords do not match.".into());
     }
@@ -147,7 +141,9 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     rand::thread_rng().fill_bytes(&mut new_salt);
     let new_key = crypto::derive_key(&new_password, &new_salt);
 
-    let tx = conn.unchecked_transaction().expect("Failed to begin transaction");
+    let tx = conn
+        .unchecked_transaction()
+        .expect("Failed to begin transaction");
 
     // Re-encrypt all credentials
     let mut stmt = tx
@@ -164,9 +160,11 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     drop(stmt);
 
     for (service, nonce, ciphertext, updated_at) in &rows {
-        let (username, password, notes, url) = crypto::decrypt(&old_key, service, nonce, ciphertext)
-            .expect("Data corruption — failed to decrypt credential during password change");
-        let (new_nonce, new_ciphertext) = crypto::encrypt(&new_key, service, &username, &password, &notes, &url);
+        let (username, password, notes, url) =
+            crypto::decrypt(&old_key, service, nonce, ciphertext)
+                .expect("Data corruption — failed to decrypt credential during password change");
+        let (new_nonce, new_ciphertext) =
+            crypto::encrypt(&new_key, service, &username, &password, &notes, &url);
         tx.execute(
             "UPDATE credentials SET nonce = ?1, ciphertext = ?2, updated_at = ?3 WHERE service = ?4",
             rusqlite::params![new_nonce, new_ciphertext, updated_at, service],

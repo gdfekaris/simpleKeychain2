@@ -12,18 +12,22 @@ fn csv_escape(field: &str) -> String {
     format!("\"{}\"", field.replace('"', "\"\""))
 }
 
-fn restrict_file_permissions(path: &std::path::Path) {
+fn restrict_file_permissions(_path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(path, perms) {
+        if let Err(e) = std::fs::set_permissions(_path, perms) {
             ui::warning(&format!("Could not set file permissions: {e}"));
         }
     }
 }
 
-pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output: &str) -> Result<(), String> {
+pub(crate) fn export_credentials(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    output: &str,
+) -> Result<(), String> {
     // Check that GPG is available
     let gpg_check = process::Command::new("gpg")
         .arg("--version")
@@ -32,7 +36,11 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
         .status();
     match gpg_check {
         Ok(status) if status.success() => {}
-        _ => return Err("GPG is not installed or not found in PATH. Install GPG to use export.".into()),
+        _ => {
+            return Err(
+                "GPG is not installed or not found in PATH. Install GPG to use export.".into(),
+            );
+        }
     }
 
     let services = db::list_services(conn);
@@ -71,7 +79,9 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
                 csv.push('\n');
             }
             None => {
-                ui::warning(&format!("Could not decrypt credential for '{service}', skipping."));
+                ui::warning(&format!(
+                    "Could not decrypt credential for '{service}', skipping."
+                ));
             }
         }
     }
@@ -90,12 +100,15 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
 
     // Pipe CSV to GPG's stdin
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(csv.as_bytes())
+        stdin
+            .write_all(csv.as_bytes())
             .map_err(|e| format!("Failed to write to GPG: {e}"))?;
         // stdin is dropped here, closing the pipe
     }
 
-    let status = child.wait().map_err(|e| format!("Failed to wait for GPG: {e}"))?;
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for GPG: {e}"))?;
     if !status.success() {
         return Err("GPG encryption failed.".into());
     }

@@ -66,7 +66,11 @@ pub(crate) fn import_credentials(
         .status();
     match gpg_check {
         Ok(status) if status.success() => {}
-        _ => return Err("GPG is not installed or not found in PATH. Install GPG to use import.".into()),
+        _ => {
+            return Err(
+                "GPG is not installed or not found in PATH. Install GPG to use import.".into(),
+            );
+        }
     }
 
     // Warning and confirmation
@@ -95,8 +99,7 @@ pub(crate) fn import_credentials(
 
     // Wrap plaintext in Zeroizing
     let csv = Zeroizing::new(
-        String::from_utf8(output.stdout)
-            .map_err(|_| "Decrypted file contains invalid UTF-8.")?
+        String::from_utf8(output.stdout).map_err(|_| "Decrypted file contains invalid UTF-8.")?,
     );
 
     let mut lines = csv.lines();
