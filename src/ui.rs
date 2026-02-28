@@ -64,11 +64,21 @@ pub(crate) fn warning_block(lines: &[&str]) {
 }
 
 pub(crate) fn get_service(value: &str) {
-    println!("{}    {} {}", "⊙".truecolor(150, 100, 50), "Service:".yellow().bold(), value.bold());
+    println!(
+        "{}    {} {}",
+        "⊙".truecolor(150, 100, 50),
+        "Service:".yellow().bold(),
+        value.bold()
+    );
 }
 
 pub(crate) fn get_username(value: &str) {
-    println!("{}  {} {}", "«◉»".truecolor(150, 100, 50), "Username:".yellow().bold(), value.bold());
+    println!(
+        "{}  {} {}",
+        "«◉»".truecolor(150, 100, 50),
+        "Username:".yellow().bold(),
+        value.bold()
+    );
 }
 
 pub(crate) fn get_url(value: &str) {
@@ -112,7 +122,8 @@ pub(crate) fn list_item_pick(n: usize, item: &str) {
 }
 
 pub(crate) fn clipboard_notice(label: &str, seconds: u64) {
-    println!("{} {} copied to clipboard (will be cleared in {seconds}s)",
+    println!(
+        "{} {} copied to clipboard (will be cleared in {seconds}s)",
         "○─┤├".blue().dimmed(),
         label.yellow().bold(),
     );
@@ -123,7 +134,10 @@ pub(crate) fn muted(msg: &str) {
 }
 
 pub(crate) fn verify_header(total: usize) {
-    println!("{}", format!("Verifying {total} credentials...").yellow().bold());
+    println!(
+        "{}",
+        format!("Verifying {total} credentials...").yellow().bold()
+    );
 }
 
 pub(crate) fn verify_ok(service: &str) {
@@ -148,7 +162,8 @@ pub(crate) fn password_strength(entropy: f64) {
 }
 
 pub(crate) fn generate_warning() {
-    eprintln!("{} This password is visible in your terminal. Only use {} for throwaway passwords.",
+    eprintln!(
+        "{} This password is visible in your terminal. Only use {} for throwaway passwords.",
         "[!]".yellow().bold(),
         "generate".bold(),
     );

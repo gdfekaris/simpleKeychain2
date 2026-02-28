@@ -179,7 +179,10 @@ fn pick_service(matches: &[String]) -> Result<String, String> {
     }
     match input.parse::<usize>() {
         Ok(n) if n >= 1 && n <= matches.len() => Ok(matches[n - 1].clone()),
-        _ => Err(format!("Invalid selection. Enter a number between 1 and {}.", matches.len())),
+        _ => Err(format!(
+            "Invalid selection. Enter a number between 1 and {}.",
+            matches.len()
+        )),
     }
 }
 
@@ -205,11 +208,11 @@ fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String
         return Err("Password length must be between 4 and 64.".into());
     }
     let alphabet_size = match charset {
-        crypto::Charset::Default      => 74.0_f64,
+        crypto::Charset::Default => 74.0_f64,
         crypto::Charset::Alphanumeric => 62.0,
-        crypto::Charset::Websafe      => 66.0,
-        crypto::Charset::Hex          => 16.0,
-        crypto::Charset::Dna          => 4.0,
+        crypto::Charset::Websafe => 66.0,
+        crypto::Charset::Hex => 16.0,
+        crypto::Charset::Dna => 4.0,
     };
     let entropy_bits = length as f64 * alphabet_size.log2();
     if entropy_bits < 64.0 {
@@ -224,9 +227,9 @@ fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String
     ui::generate_warning();
     ui::generated_password(&password);
 
-    let mut clipboard = Clipboard::new()
-        .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-    clipboard.set_text(password.as_str())
+    let mut clipboard = Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+    clipboard
+        .set_text(password.as_str())
         .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
 
     match std::env::current_exe() {
@@ -256,7 +259,9 @@ fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String
 
 fn run(cli: Cli) -> Result<(), String> {
     let vault_arg = cli.vault;
-    let command = cli.command.ok_or("No command provided. Run with --help for usage.")?;
+    let command = cli
+        .command
+        .ok_or("No command provided. Run with --help for usage.")?;
 
     // Generate needs no vault access — exit before vault_path() is ever called.
     if let Command::Generate { length, charset } = command {
@@ -274,7 +279,14 @@ fn run(cli: Cli) -> Result<(), String> {
             vault::init_vault(&conn)?;
         }
 
-        Command::Add { service, generate, length, charset, notes, url } => {
+        Command::Add {
+            service,
+            generate,
+            length,
+            charset,
+            notes,
+            url,
+        } => {
             let key = vault::unlock_vault(&conn)?;
             let username = vault::prompt("Username: ");
 
@@ -283,11 +295,11 @@ fn run(cli: Cli) -> Result<(), String> {
                     return Err("Password length must be between 4 and 64.".into());
                 }
                 let alphabet_size = match charset {
-                    crypto::Charset::Default      => 74.0_f64,
+                    crypto::Charset::Default => 74.0_f64,
                     crypto::Charset::Alphanumeric => 62.0,
-                    crypto::Charset::Websafe      => 66.0,
-                    crypto::Charset::Hex          => 16.0,
-                    crypto::Charset::Dna          => 4.0,
+                    crypto::Charset::Websafe => 66.0,
+                    crypto::Charset::Hex => 16.0,
+                    crypto::Charset::Dna => 4.0,
                 };
                 let entropy_bits = length as f64 * alphabet_size.log2();
                 if entropy_bits < 64.0 {
@@ -306,8 +318,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 ui::service_password_prompt("Password: ");
                 let p = Zeroizing::new(
-                    rpassword::read_password_from_tty(None)
-                        .expect("Failed to read password"),
+                    rpassword::read_password_from_tty(None).expect("Failed to read password"),
                 );
                 if p.is_empty() {
                     return Err("Password cannot be empty.".into());
@@ -316,25 +327,43 @@ fn run(cli: Cli) -> Result<(), String> {
                 p
             };
 
-            let notes_value = if notes { vault::plain_prompt("Notes: ") } else { String::new() };
+            let notes_value = if notes {
+                vault::plain_prompt("Notes: ")
+            } else {
+                String::new()
+            };
 
-            db::add_credential(&conn, &key, &service, &username, &password,
+            db::add_credential(
+                &conn,
+                &key,
+                &service,
+                &username,
+                &password,
                 &notes_value,
-                url.as_deref().unwrap_or(""));
+                url.as_deref().unwrap_or(""),
+            );
             ui::success(&format!("Credential stored for '{service}'."));
         }
 
-        Command::Get { service, username: copy_username } => {
+        Command::Get {
+            service,
+            username: copy_username,
+        } => {
             let key = vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
             match db::get_credential(&conn, &key, &service) {
                 Some((username, password, notes, url, updated_at)) => {
                     let password = Zeroizing::new(password);
                     let clipboard_text: &str = if copy_username { &username } else { &password };
-                    let clipboard_label = if copy_username { "Username:" } else { "Password:" };
-                    let mut clipboard = Clipboard::new()
-                        .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-                    clipboard.set_text(clipboard_text)
+                    let clipboard_label = if copy_username {
+                        "Username:"
+                    } else {
+                        "Password:"
+                    };
+                    let mut clipboard =
+                        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+                    clipboard
+                        .set_text(clipboard_text)
                         .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
 
                     // Spawn a detached child process to clear the clipboard after the timeout.
@@ -348,7 +377,9 @@ fn run(cli: Cli) -> Result<(), String> {
                                 .stderr(process::Stdio::null())
                                 .spawn();
                             if let Err(e) = result {
-                                ui::warning(&format!("Could not spawn clipboard-clear process: {e}"));
+                                ui::warning(&format!(
+                                    "Could not spawn clipboard-clear process: {e}"
+                                ));
                             }
                         }
                         Err(e) => {
@@ -379,7 +410,8 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Delete { service } => {
             vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
-            let confirm = vault::plain_prompt(&format!("Delete credential for '{service}'? [y/N]: "));
+            let confirm =
+                vault::plain_prompt(&format!("Delete credential for '{service}'? [y/N]: "));
             if confirm.trim().to_lowercase() != "y" {
                 return Err("Deletion cancelled.".into());
             }
@@ -390,13 +422,20 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::List { filter, stale, days } => {
+        Command::List {
+            filter,
+            stale,
+            days,
+        } => {
             vault::unlock_vault(&conn)?;
             if stale {
                 let all_entries = db::list_services_with_timestamps(&conn);
                 let entries: Vec<_> = if let Some(ref q) = filter {
                     let q_lower = q.to_lowercase();
-                    all_entries.into_iter().filter(|(s, _)| s.to_lowercase().contains(&q_lower)).collect()
+                    all_entries
+                        .into_iter()
+                        .filter(|(s, _)| s.to_lowercase().contains(&q_lower))
+                        .collect()
                 } else {
                     all_entries
                 };
@@ -408,9 +447,10 @@ fn run(cli: Cli) -> Result<(), String> {
                         .expect("Time went backwards")
                         .as_secs() as i64;
                     let threshold = (days * 86400) as i64;
-                    let stale_entries: Vec<_> = entries.iter().filter(|(_, ts)| {
-                        ts.is_none_or(|t| now - t >= threshold)
-                    }).collect();
+                    let stale_entries: Vec<_> = entries
+                        .iter()
+                        .filter(|(_, ts)| ts.is_none_or(|t| now - t >= threshold))
+                        .collect();
                     if stale_entries.is_empty() {
                         ui::muted(&format!("No credentials older than {days} days."));
                     } else {
@@ -454,7 +494,13 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
 
-        Command::Edit { service, username: edit_username, password: edit_password, notes: edit_notes, url: edit_url } => {
+        Command::Edit {
+            service,
+            username: edit_username,
+            password: edit_password,
+            notes: edit_notes,
+            url: edit_url,
+        } => {
             let key = vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
 
@@ -469,7 +515,11 @@ fn run(cli: Cli) -> Result<(), String> {
 
             let new_username = if prompt_username {
                 let input = vault::prompt(&format!("Username [{}]: ", current_username));
-                if input.is_empty() { current_username } else { input }
+                if input.is_empty() {
+                    current_username
+                } else {
+                    input
+                }
             } else {
                 current_username
             };
@@ -478,8 +528,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let new_password: Zeroizing<String> = if prompt_password {
                 ui::service_password_prompt("New password (leave blank to keep current): ");
                 let input = Zeroizing::new(
-                    rpassword::read_password_from_tty(None)
-                        .expect("Failed to read password"),
+                    rpassword::read_password_from_tty(None).expect("Failed to read password"),
                 );
                 if input.is_empty() {
                     current_password
@@ -493,28 +542,52 @@ fn run(cli: Cli) -> Result<(), String> {
             };
 
             let new_notes = if edit_notes {
-                let display = if current_notes.is_empty() { "(none)".to_string() } else { current_notes.clone() };
+                let display = if current_notes.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    current_notes.clone()
+                };
                 let input = vault::plain_prompt(&format!("Notes [{}]: ", display));
-                if input.is_empty() { current_notes } else { input }
+                if input.is_empty() {
+                    current_notes
+                } else {
+                    input
+                }
             } else {
                 current_notes
             };
 
             let new_url = if edit_url {
-                let display = if current_url.is_empty() { "(none)".to_string() } else { current_url.clone() };
+                let display = if current_url.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    current_url.clone()
+                };
                 let input = vault::plain_prompt(&format!("URL [{}]: ", display));
                 if input.is_empty() { current_url } else { input }
             } else {
                 current_url
             };
 
-            if !db::update_credential(&conn, &key, &service, &new_username, &new_password, &new_notes, &new_url, password_was_changed) {
+            if !db::update_credential(
+                &conn,
+                &key,
+                &service,
+                &new_username,
+                &new_password,
+                &new_notes,
+                &new_url,
+                password_was_changed,
+            ) {
                 return Err(format!("No credential found for '{service}'."));
             }
             ui::success(&format!("Credential for '{service}' updated."));
         }
 
-        Command::Rename { old_service, new_service } => {
+        Command::Rename {
+            old_service,
+            new_service,
+        } => {
             let key = vault::unlock_vault(&conn)?;
             let old_service = resolve_service(&conn, &old_service)?;
             db::rename_credential(&conn, &key, &old_service, &new_service)?;
@@ -540,10 +613,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 let ok = rows.len() - failed;
                 if failed == 0 {
-                    ui::success(&format!("All {} credentials verified successfully.", rows.len()));
+                    ui::success(&format!(
+                        "All {} credentials verified successfully.",
+                        rows.len()
+                    ));
                 } else {
-                    ui::warning("If you have a backup: run 'sk2 import <backup.csv.gpg>' to restore the affected credential(s).");
-                    ui::warning("No backup: run 'sk2 delete <service>' and reset the password on the affected site(s).");
+                    ui::warning(
+                        "If you have a backup: run 'sk2 import <backup.csv.gpg>' to restore the affected credential(s).",
+                    );
+                    ui::warning(
+                        "No backup: run 'sk2 delete <service>' and reset the password on the affected site(s).",
+                    );
                     return Err(format!(
                         "{ok} of {} credentials verified. {failed} failed — vault may be corrupt.",
                         rows.len()
