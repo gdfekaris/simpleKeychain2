@@ -24,6 +24,7 @@ pub(crate) fn warning(msg: &str) {
     eprintln!("{} {msg}", "[!]".yellow().bold());
 }
 
+#[cfg(feature = "export")]
 pub(crate) fn info(label: &str, value: &str) {
     println!("  {} {}", format!("{label}:").yellow().bold(), value.bold());
 }

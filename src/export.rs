@@ -12,12 +12,12 @@ fn csv_escape(field: &str) -> String {
     format!("\"{}\"", field.replace('"', "\"\""))
 }
 
-fn restrict_file_permissions(path: &std::path::Path) {
+fn restrict_file_permissions(_path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(path, perms) {
+        if let Err(e) = std::fs::set_permissions(_path, perms) {
             ui::warning(&format!("Could not set file permissions: {e}"));
         }
     }
