@@ -37,18 +37,18 @@ fn require_vault(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn restrict_db_permissions(path: &std::path::Path) {
+pub(crate) fn restrict_db_permissions(_path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = _path.parent() {
             let dir_perms = std::fs::Permissions::from_mode(0o700);
             if let Err(e) = std::fs::set_permissions(parent, dir_perms) {
                 ui::warning(&format!("Could not set directory permissions: {e}"));
             }
         }
         let file_perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(path, file_perms) {
+        if let Err(e) = std::fs::set_permissions(_path, file_perms) {
             ui::warning(&format!("Could not set database permissions: {e}"));
         }
     }
