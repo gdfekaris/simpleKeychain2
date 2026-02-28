@@ -167,3 +167,79 @@ pub(crate) fn import_credentials(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_unquoted() {
+        let fields = parse_csv_line("a,b,c").unwrap();
+        assert_eq!(fields, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn quoted_fields() {
+        let fields = parse_csv_line("\"hello\",\"world\"").unwrap();
+        assert_eq!(fields, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn escaped_quotes() {
+        let fields = parse_csv_line("\"he said \"\"hi\"\"\"").unwrap();
+        assert_eq!(fields, vec!["he said \"hi\""]);
+    }
+
+    #[test]
+    fn commas_inside_quotes() {
+        let fields = parse_csv_line("\"a,b\",c").unwrap();
+        assert_eq!(fields, vec!["a,b", "c"]);
+    }
+
+    #[test]
+    fn empty_fields() {
+        let fields = parse_csv_line(",,").unwrap();
+        assert_eq!(fields, vec!["", "", ""]);
+    }
+
+    #[test]
+    fn unterminated_quote() {
+        let result = parse_csv_line("\"unterminated");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unterminated"));
+    }
+
+    #[test]
+    fn mid_field_quote() {
+        let result = parse_csv_line("ab\"cd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unexpected quote"));
+    }
+
+    #[test]
+    fn single_field() {
+        let fields = parse_csv_line("hello").unwrap();
+        assert_eq!(fields, vec!["hello"]);
+    }
+
+    #[test]
+    fn empty_string() {
+        let fields = parse_csv_line("").unwrap();
+        assert_eq!(fields, vec![""]);
+    }
+
+    #[test]
+    fn five_field_row() {
+        let fields = parse_csv_line("svc,user,pass,notes,https://example.com").unwrap();
+        assert_eq!(fields.len(), 5);
+        assert_eq!(fields[0], "svc");
+        assert_eq!(fields[4], "https://example.com");
+    }
+
+    #[test]
+    fn newline_inside_quotes() {
+        let fields = parse_csv_line("\"line1\nline2\",b").unwrap();
+        assert_eq!(fields[0], "line1\nline2");
+        assert_eq!(fields[1], "b");
+    }
+}
