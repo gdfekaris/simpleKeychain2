@@ -235,3 +235,264 @@ pub(crate) fn find_matching_services(conn: &Connection, query: &str) -> Vec<Stri
         .map(|r| r.expect("Failed to read row"))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_KEY: [u8; KEY_LEN] = [
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+    ];
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn);
+        conn
+    }
+
+    // -- init / metadata (5 tests) --
+
+    #[test]
+    fn init_db_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_db(&conn);
+        init_db(&conn); // should not panic
+    }
+
+    #[test]
+    fn is_first_run_before_metadata() {
+        let conn = setup();
+        assert!(is_first_run(&conn));
+    }
+
+    #[test]
+    fn is_first_run_after_metadata() {
+        let conn = setup();
+        store_metadata(&conn, &[0u8; 16], &[0u8; 24], &[0u8; 32]);
+        assert!(!is_first_run(&conn));
+    }
+
+    #[test]
+    fn salt_roundtrip() {
+        let conn = setup();
+        let salt = vec![0xaa; 16];
+        store_metadata(&conn, &salt, &[0u8; 24], &[0u8; 32]);
+        assert_eq!(load_salt(&conn), salt);
+    }
+
+    #[test]
+    fn verify_token_roundtrip() {
+        let conn = setup();
+        let nonce = vec![0xbb; 24];
+        let ct = vec![0xcc; 32];
+        store_metadata(&conn, &[0u8; 16], &nonce, &ct);
+        let (n, c) = load_verify_token(&conn);
+        assert_eq!(n, nonce);
+        assert_eq!(c, ct);
+    }
+
+    // -- credential CRUD (9 tests) --
+
+    #[test]
+    fn add_get_roundtrip() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "github", "user", "pass123", "notes", "https://github.com");
+        let (u, p, n, url, ts) = get_credential(&conn, &TEST_KEY, "github").unwrap();
+        assert_eq!(u, "user");
+        assert_eq!(p, "pass123");
+        assert_eq!(n, "notes");
+        assert_eq!(url, "https://github.com");
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn get_missing_returns_none() {
+        let conn = setup();
+        assert!(get_credential(&conn, &TEST_KEY, "nonexistent").is_none());
+    }
+
+    #[test]
+    fn add_overwrite_semantics() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "old_user", "old_pass", "", "");
+        add_credential(&conn, &TEST_KEY, "svc", "new_user", "new_pass", "", "");
+        let (u, p, _, _, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap();
+        assert_eq!(u, "new_user");
+        assert_eq!(p, "new_pass");
+    }
+
+    #[test]
+    fn delete_existing() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
+        assert!(delete_credential(&conn, "svc"));
+        assert!(get_credential(&conn, &TEST_KEY, "svc").is_none());
+    }
+
+    #[test]
+    fn delete_nonexistent() {
+        let conn = setup();
+        assert!(!delete_credential(&conn, "nope"));
+    }
+
+    #[test]
+    fn update_existing() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "u1", "p1", "", "");
+        assert!(update_credential(&conn, &TEST_KEY, "svc", "u2", "p2", "notes", "url", true));
+        let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap();
+        assert_eq!(u, "u2");
+        assert_eq!(p, "p2");
+        assert_eq!(n, "notes");
+        assert_eq!(url, "url");
+    }
+
+    #[test]
+    fn update_nonexistent() {
+        let conn = setup();
+        assert!(!update_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "", true));
+    }
+
+    #[test]
+    fn update_preserves_timestamp() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
+        let ts1 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4;
+        update_credential(&conn, &TEST_KEY, "svc", "u2", "p2", "", "", false);
+        let ts2 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4;
+        assert_eq!(ts1, ts2);
+    }
+
+    #[test]
+    fn update_changes_timestamp() {
+        let conn = setup();
+        let (nonce, ct) = crypto::encrypt(&TEST_KEY, "svc", "u", "p", "", "");
+        conn.execute(
+            "INSERT INTO credentials (service, nonce, ciphertext, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["svc", nonce, ct, 1000],
+        ).unwrap();
+        let ts1 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4.unwrap();
+        assert_eq!(ts1, 1000);
+        update_credential(&conn, &TEST_KEY, "svc", "u2", "p2", "", "", true);
+        let ts2 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4.unwrap();
+        assert!(ts2 > ts1);
+    }
+
+    // -- rename (3 tests) --
+
+    #[test]
+    fn rename_happy_path() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "old", "u", "p", "n", "url");
+        rename_credential(&conn, &TEST_KEY, "old", "new").unwrap();
+        assert!(get_credential(&conn, &TEST_KEY, "old").is_none());
+        let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "new").unwrap();
+        assert_eq!(u, "u");
+        assert_eq!(p, "p");
+        assert_eq!(n, "n");
+        assert_eq!(url, "url");
+    }
+
+    #[test]
+    fn rename_target_exists() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "a", "u", "p", "", "");
+        add_credential(&conn, &TEST_KEY, "b", "u", "p", "", "");
+        let err = rename_credential(&conn, &TEST_KEY, "a", "b").unwrap_err();
+        assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn rename_source_missing() {
+        let conn = setup();
+        let err = rename_credential(&conn, &TEST_KEY, "nope", "new").unwrap_err();
+        assert!(err.contains("No credential found"));
+    }
+
+    // -- listing / search (6 tests) --
+
+    #[test]
+    fn list_empty() {
+        let conn = setup();
+        assert!(list_services(&conn).is_empty());
+    }
+
+    #[test]
+    fn list_alphabetical_order() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "charlie", "u", "p", "", "");
+        add_credential(&conn, &TEST_KEY, "alpha", "u", "p", "", "");
+        add_credential(&conn, &TEST_KEY, "bravo", "u", "p", "", "");
+        assert_eq!(list_services(&conn), vec!["alpha", "bravo", "charlie"]);
+    }
+
+    #[test]
+    fn list_with_timestamps() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
+        let items = list_services_with_timestamps(&conn);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].0, "svc");
+        assert!(items[0].1.is_some());
+    }
+
+    #[test]
+    fn service_exists_true_and_false() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "exists", "u", "p", "", "");
+        assert!(service_exists(&conn, "exists"));
+        assert!(!service_exists(&conn, "nope"));
+    }
+
+    #[test]
+    fn find_matching_case_insensitive() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "GitHub", "u", "p", "", "");
+        add_credential(&conn, &TEST_KEY, "GitLab", "u", "p", "", "");
+        add_credential(&conn, &TEST_KEY, "BitBucket", "u", "p", "", "");
+        let matches = find_matching_services(&conn, "git");
+        assert_eq!(matches, vec!["GitHub", "GitLab"]);
+    }
+
+    #[test]
+    fn find_matching_no_match() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "github", "u", "p", "", "");
+        assert!(find_matching_services(&conn, "zzz").is_empty());
+    }
+
+    // -- edge cases (3 tests) --
+
+    #[test]
+    fn get_all_credentials_raw_returns_blobs() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
+        let raw = get_all_credentials_raw(&conn);
+        assert_eq!(raw.len(), 1);
+        assert_eq!(raw[0].0, "svc");
+        assert!(!raw[0].1.is_empty());
+        assert!(!raw[0].2.is_empty());
+    }
+
+    #[test]
+    fn sql_injection_resistance() {
+        let conn = setup();
+        let evil = "'; DROP TABLE credentials; --";
+        add_credential(&conn, &TEST_KEY, evil, "u", "p", "", "");
+        let result = get_credential(&conn, &TEST_KEY, evil);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, "u");
+    }
+
+    #[test]
+    fn unicode_service_names() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "日本語サービス", "ユーザー", "パスワード", "", "");
+        assert!(service_exists(&conn, "日本語サービス"));
+        let (u, _, _, _, _) = get_credential(&conn, &TEST_KEY, "日本語サービス").unwrap();
+        assert_eq!(u, "ユーザー");
+    }
+}

@@ -113,3 +113,33 @@ pub(crate) fn export_credentials(conn: &Connection, key: &[u8; KEY_LEN], output:
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_plain_text() {
+        assert_eq!(csv_escape("hello"), "\"hello\"");
+    }
+
+    #[test]
+    fn escape_quotes() {
+        assert_eq!(csv_escape("say \"hi\""), "\"say \"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn escape_commas() {
+        assert_eq!(csv_escape("a,b"), "\"a,b\"");
+    }
+
+    #[test]
+    fn escape_empty() {
+        assert_eq!(csv_escape(""), "\"\"");
+    }
+
+    #[test]
+    fn escape_newlines() {
+        assert_eq!(csv_escape("line1\nline2"), "\"line1\nline2\"");
+    }
+}
