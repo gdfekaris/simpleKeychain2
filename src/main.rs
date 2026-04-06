@@ -203,7 +203,10 @@ fn resolve_service(conn: &Connection, query: &str) -> Result<String, String> {
 
 // --- Generate (no vault) ---
 
-fn validated_generate(length: usize, charset: &crypto::Charset) -> Result<Zeroizing<String>, String> {
+fn validated_generate(
+    length: usize,
+    charset: &crypto::Charset,
+) -> Result<Zeroizing<String>, String> {
     if !(4..=64).contains(&length) {
         return Err("Password length must be between 4 and 64.".into());
     }
