@@ -203,7 +203,7 @@ fn resolve_service(conn: &Connection, query: &str) -> Result<String, String> {
 
 // --- Generate (no vault) ---
 
-fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String> {
+fn validated_generate(length: usize, charset: &crypto::Charset) -> Result<Zeroizing<String>, String> {
     if !(4..=64).contains(&length) {
         return Err("Password length must be between 4 and 64.".into());
     }
@@ -221,8 +221,11 @@ fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String
             entropy_bits
         ));
     }
+    Ok(crypto::generate_password(length, charset))
+}
 
-    let password = crypto::generate_password(length, &charset);
+fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String> {
+    let password = validated_generate(length, &charset)?;
 
     ui::generate_warning();
     ui::generated_password(&password);
@@ -291,24 +294,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let username = vault::prompt("Username: ");
 
             let password = if generate {
-                if !(4..=64).contains(&length) {
-                    return Err("Password length must be between 4 and 64.".into());
-                }
-                let alphabet_size = match charset {
-                    crypto::Charset::Default => 74.0_f64,
-                    crypto::Charset::Alphanumeric => 62.0,
-                    crypto::Charset::Websafe => 66.0,
-                    crypto::Charset::Hex => 16.0,
-                    crypto::Charset::Dna => 4.0,
-                };
-                let entropy_bits = length as f64 * alphabet_size.log2();
-                if entropy_bits < 64.0 {
-                    ui::warning(&format!(
-                        "Low entropy: ~{:.0} bits. Consider increasing --length.",
-                        entropy_bits
-                    ));
-                }
-                crypto::generate_password(length, &charset)
+                validated_generate(length, &charset)?
             } else {
                 if length != 16 {
                     return Err("--length requires --generate.".into());
