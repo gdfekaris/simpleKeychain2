@@ -976,6 +976,7 @@ dependencies = [
  "clap",
  "colored",
  "dirs",
+ "libc",
  "rand",
  "rpassword",
  "rusqlite",

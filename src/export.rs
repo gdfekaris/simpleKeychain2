@@ -1,8 +1,10 @@
 use rusqlite::Connection;
-use std::io::Write;
+use std::fs::File;
+use std::io::{self, Write};
 use std::process;
 use zeroize::Zeroizing;
 
+use crate::backup;
 use crate::constants::*;
 use crate::db;
 use crate::ui;
@@ -12,23 +14,96 @@ fn csv_escape(field: &str) -> String {
     format!("\"{}\"", field.replace('"', "\"\""))
 }
 
-fn restrict_file_permissions(_path: &std::path::Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(_path, perms) {
-            ui::warning(&format!("Could not set file permissions: {e}"));
+fn open_output(path: &str, overwrite: bool) -> Result<File, String> {
+    if overwrite {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("Failed to remove existing file '{path}': {e}")),
         }
     }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path).map_err(|e| {
+        if e.kind() == io::ErrorKind::AlreadyExists {
+            format!("Output file '{path}' already exists. Pass --overwrite to replace it.")
+        } else {
+            format!("Failed to open output file '{path}': {e}")
+        }
+    })
 }
 
-pub(crate) fn export_credentials(
+fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
+    ui::password_prompt("Backup passphrase: ");
+    let p1 =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    if p1.is_empty() {
+        return Err("Backup passphrase cannot be empty.".into());
+    }
+    ui::password_prompt("Confirm backup passphrase: ");
+    let p2 =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    if *p1 != *p2 {
+        return Err("Backup passphrases do not match.".into());
+    }
+    Ok(p1)
+}
+
+pub(crate) fn export_sk2b(
     conn: &Connection,
     key: &[u8; KEY_LEN],
     output: &str,
+    overwrite: bool,
 ) -> Result<(), String> {
-    // Check that GPG is available
+    let services = db::list_services(conn);
+    if services.is_empty() {
+        ui::muted("No credentials to export.");
+        return Ok(());
+    }
+
+    ui::warning_block(&[
+        "This will export ALL stored credentials into an encrypted sk2 backup (.sk2backup).",
+        "The backup can be decrypted only with 'sk2 import' and the passphrase you choose next.",
+        "Anyone with the backup passphrase can read your passwords.",
+    ]);
+    println!();
+    let answer = vault::prompt("Type 'yes' to continue: ");
+    if answer != "yes" {
+        return Err("Export cancelled.".into());
+    }
+
+    let passphrase = read_backup_passphrase()?;
+
+    let blob = backup::export_vault(conn, key, &passphrase)?;
+
+    let mut file = open_output(output, overwrite)?;
+    file.write_all(&blob)
+        .map_err(|e| format!("Failed to write backup to '{output}': {e}"))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to flush backup to disk: {e}"))?;
+
+    let count = services.len();
+    println!();
+    ui::success(&format!("Exported {count} credential(s) to: {output}"));
+    ui::muted("Format: SK2B (Argon2id + XChaCha20-Poly1305). Permissions: 0600.");
+    println!();
+    ui::info("To restore", &format!("sk2 import {output}"));
+    ui::reminder("REMINDER: Delete this file once you no longer need it.");
+
+    Ok(())
+}
+
+pub(crate) fn export_gpg(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    output: &str,
+    overwrite: bool,
+) -> Result<(), String> {
     let gpg_check = process::Command::new("gpg")
         .arg("--version")
         .stdout(process::Stdio::null())
@@ -38,7 +113,8 @@ pub(crate) fn export_credentials(
         Ok(status) if status.success() => {}
         _ => {
             return Err(
-                "GPG is not installed or not found in PATH. Install GPG to use export.".into(),
+                "GPG is not installed or not found in PATH. Install GPG to use --format gpg."
+                    .into(),
             );
         }
     }
@@ -49,11 +125,11 @@ pub(crate) fn export_credentials(
         return Ok(());
     }
 
-    // Pre-export warning
     ui::warning_block(&[
-        "This will export ALL stored credentials into a GPG-encrypted file.",
+        "This will export ALL stored credentials into a GPG-encrypted file (legacy format).",
         &format!("The file can be decrypted with: gpg -d {output}"),
         "Anyone with the export passphrase can read your passwords.",
+        "Note: .sk2backup uses a stronger KDF and is the recommended format.",
     ]);
     println!();
     let answer = vault::prompt("Type 'yes' to continue: ");
@@ -61,7 +137,6 @@ pub(crate) fn export_credentials(
         return Err("Export cancelled.".into());
     }
 
-    // Build CSV in memory (zeroized on drop)
     let mut csv = Zeroizing::new(String::from("name,username,password,notes,url\n"));
     for service in &services {
         match db::get_credential(conn, key, service) {
@@ -86,40 +161,57 @@ pub(crate) fn export_credentials(
         }
     }
 
-    // Spawn GPG with piped stdin
-    let output_path = std::path::Path::new(output);
+    // Open our own output file (H7 fix: do not let gpg --output create the file).
+    let mut file = open_output(output, overwrite)?;
+
     let mut child = process::Command::new("gpg")
         .arg("--symmetric")
         .arg("--cipher-algo")
         .arg("AES256")
-        .arg("--output")
-        .arg(output)
         .stdin(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::inherit())
         .spawn()
         .map_err(|e| format!("Failed to start GPG: {e}"))?;
 
-    // Pipe CSV to GPG's stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(csv.as_bytes())
-            .map_err(|e| format!("Failed to write to GPG: {e}"))?;
-        // stdin is dropped here, closing the pipe
-    }
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Failed to open GPG stdin".to_string())?;
+    let writer = std::thread::spawn(move || -> io::Result<()> {
+        stdin.write_all(csv.as_bytes())?;
+        // csv (Zeroizing) drops here; stdin closes to signal EOF to GPG.
+        Ok(())
+    });
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to open GPG stdout".to_string())?;
+    io::copy(&mut stdout, &mut file)
+        .map_err(|e| format!("Failed to write GPG output to '{output}': {e}"))?;
+
+    writer
+        .join()
+        .map_err(|_| "GPG writer thread panicked".to_string())?
+        .map_err(|e| format!("Failed to feed CSV into GPG: {e}"))?;
 
     let status = child
         .wait()
         .map_err(|e| format!("Failed to wait for GPG: {e}"))?;
     if !status.success() {
+        // File will be a partial GPG stream; remove it so users aren't misled.
+        let _ = std::fs::remove_file(output);
         return Err("GPG encryption failed.".into());
     }
 
-    // Set output file permissions to 0o600
-    restrict_file_permissions(output_path);
+    file.sync_all()
+        .map_err(|e| format!("Failed to flush GPG output to disk: {e}"))?;
 
     let count = services.len();
     println!();
     ui::success(&format!("Exported {count} credential(s) to: {output}"));
-    ui::muted("Permissions set to owner-read/write only (0600).");
+    ui::muted("Format: GPG symmetric (legacy, weaker KDF). Permissions: 0600.");
     println!();
     ui::info("To decrypt", &format!("gpg -d {output}"));
     ui::reminder("REMINDER: Delete this file once you no longer need it.");
