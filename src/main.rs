@@ -1,3 +1,5 @@
+#[cfg(any(feature = "export", feature = "import"))]
+mod backup;
 mod constants;
 mod crypto;
 mod db;
@@ -28,6 +30,20 @@ use zeroize::Zeroizing;
 
 use constants::*;
 
+fn ensure_dir(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(path)
+            .expect("Failed to create vault directory");
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(path).expect("Failed to create vault directory");
+}
+
 fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
     let path = if let Some(p) = cli_override {
         std::path::PathBuf::from(p)
@@ -37,14 +53,14 @@ fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
         let dir = dirs::home_dir()
             .expect("Could not determine home directory")
             .join(".sk2");
-        std::fs::create_dir_all(&dir).expect("Failed to create vault directory");
+        ensure_dir(&dir);
         return dir.join("vault.db");
     };
 
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).expect("Failed to create vault directory");
+        ensure_dir(parent);
     }
     path
 }
@@ -151,19 +167,66 @@ enum Command {
     Verify,
     /// Change the master password
     ChangePassword,
-    /// Export all credentials as a GPG-encrypted CSV file
+    /// Export all credentials as an encrypted backup file
     #[cfg(feature = "export")]
     Export {
-        /// Output file path
-        #[arg(short, long, default_value = "sk2-export.csv.gpg")]
-        output: String,
+        /// Output file path (default: sk2-export.sk2backup, or sk2-export.csv.gpg for --format gpg)
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Backup format (default: sk2b; inferred from --output extension when set)
+        #[arg(long)]
+        format: Option<ExportFormat>,
+        /// Overwrite the output file if it already exists
+        #[arg(long)]
+        overwrite: bool,
     },
-    /// Import credentials from a GPG-encrypted CSV file
+    /// Import credentials from an encrypted backup file (autodetects .sk2backup or .csv.gpg)
     #[cfg(feature = "import")]
     Import {
-        /// Path to the GPG-encrypted CSV file
+        /// Path to the backup file (.sk2backup or .csv.gpg)
         file: String,
     },
+}
+
+#[cfg(feature = "export")]
+#[derive(Copy, Clone, clap::ValueEnum)]
+enum ExportFormat {
+    /// SK2B: Argon2id + XChaCha20-Poly1305 (recommended, iOS-compatible)
+    #[value(name = "sk2b")]
+    Sk2b,
+    /// GPG symmetric AES-256 (legacy, weaker KDF)
+    Gpg,
+}
+
+#[cfg(feature = "export")]
+fn resolve_export_format(
+    flag: Option<ExportFormat>,
+    output: Option<&str>,
+) -> Result<ExportFormat, String> {
+    if let Some(f) = flag {
+        return Ok(f);
+    }
+    let Some(path) = output else {
+        return Ok(ExportFormat::Sk2b);
+    };
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".sk2backup") {
+        Ok(ExportFormat::Sk2b)
+    } else if lower.ends_with(".gpg") {
+        Ok(ExportFormat::Gpg)
+    } else {
+        Err(format!(
+            "Cannot infer backup format from '{path}'. Pass --format sk2b or --format gpg."
+        ))
+    }
+}
+
+#[cfg(feature = "export")]
+fn default_output_for(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Sk2b => "sk2-export.sk2backup",
+        ExportFormat::Gpg => "sk2-export.csv.gpg",
+    }
 }
 
 // --- Service resolution (partial-match) ---
@@ -276,7 +339,6 @@ fn run(cli: Cli) -> Result<(), String> {
 
     let db_path = vault_path(vault_arg.as_deref());
     let conn = Connection::open(&db_path).expect("Failed to open database");
-    vault::restrict_db_permissions(&db_path);
     db::init_db(&conn);
 
     match command {
@@ -608,7 +670,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     ));
                 } else {
                     ui::warning(
-                        "If you have a backup: run 'sk2 import <backup.csv.gpg>' to restore the affected credential(s).",
+                        "If you have a backup: run 'sk2 import <backup.sk2backup>' to restore the affected credential(s).",
                     );
                     ui::warning(
                         "No backup: run 'sk2 delete <service>' and reset the password on the affected site(s).",
@@ -626,9 +688,18 @@ fn run(cli: Cli) -> Result<(), String> {
         }
 
         #[cfg(feature = "export")]
-        Command::Export { output } => {
+        Command::Export {
+            output,
+            format,
+            overwrite,
+        } => {
             let key = vault::unlock_vault(&conn)?;
-            export::export_credentials(&conn, &key, &output)?;
+            let format = resolve_export_format(format, output.as_deref())?;
+            let output = output.unwrap_or_else(|| default_output_for(format).to_string());
+            match format {
+                ExportFormat::Sk2b => export::export_sk2b(&conn, &key, &output, overwrite)?,
+                ExportFormat::Gpg => export::export_gpg(&conn, &key, &output, overwrite)?,
+            }
         }
 
         #[cfg(feature = "import")]
@@ -642,6 +713,13 @@ fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn main() -> process::ExitCode {
+    // Process-wide umask: every file/dir we create inherits 0o600/0o700.
+    // Defense in depth for paths we don't explicitly open with mode().
+    #[cfg(unix)]
+    unsafe {
+        libc::umask(0o077);
+    }
+
     let banner = ui::colored_banner();
     let version: &str = format!("\n{banner}\n  v{}", env!("CARGO_PKG_VERSION")).leak();
 

@@ -1,7 +1,9 @@
 use rusqlite::Connection;
+use std::io::Read;
 use std::process;
 use zeroize::Zeroizing;
 
+use crate::backup;
 use crate::constants::*;
 use crate::db;
 use crate::ui;
@@ -17,11 +19,9 @@ fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
         if in_quotes {
             if ch == '"' {
                 if chars.peek() == Some(&'"') {
-                    // Escaped double quote
                     chars.next();
                     current.push('"');
                 } else {
-                    // End of quoted field
                     in_quotes = false;
                 }
             } else {
@@ -48,17 +48,63 @@ fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
     Ok(fields)
 }
 
+fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
+    ui::password_prompt("Backup passphrase: ");
+    let p =
+        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    if p.is_empty() {
+        return Err("Backup passphrase cannot be empty.".into());
+    }
+    Ok(p)
+}
+
 pub(crate) fn import_credentials(
     conn: &Connection,
     key: &[u8; KEY_LEN],
     file: &str,
 ) -> Result<(), String> {
-    // Validate file exists
     if !std::path::Path::new(file).exists() {
         return Err(format!("File not found: {file}"));
     }
 
-    // Check that GPG is available
+    let mut magic = [0u8; 4];
+    let n = {
+        let mut f =
+            std::fs::File::open(file).map_err(|e| format!("Failed to open '{file}': {e}"))?;
+        f.read(&mut magic).unwrap_or(0)
+    };
+
+    if n >= 4 && magic == backup::BACKUP_MAGIC {
+        import_sk2b(conn, key, file)
+    } else {
+        import_gpg(conn, key, file)
+    }
+}
+
+fn import_sk2b(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(), String> {
+    ui::warning_block(&[
+        "This will import credentials from an sk2 backup (.sk2backup).",
+        "Existing credentials with the same service name will be OVERWRITTEN.",
+    ]);
+    println!();
+    let answer = vault::prompt("Type 'yes' to continue: ");
+    if answer != "yes" {
+        return Err("Import cancelled.".into());
+    }
+
+    let blob =
+        Zeroizing::new(std::fs::read(file).map_err(|e| format!("Failed to read '{file}': {e}"))?);
+    let passphrase = read_backup_passphrase()?;
+
+    let count = backup::import_vault(conn, key, &blob, &passphrase)?;
+
+    println!();
+    ui::success(&format!("Imported {count} credential(s)."));
+    ui::reminder("REMINDER: Delete the backup file if you no longer need it.");
+    Ok(())
+}
+
+fn import_gpg(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(), String> {
     let gpg_check = process::Command::new("gpg")
         .arg("--version")
         .stdout(process::Stdio::null())
@@ -68,15 +114,16 @@ pub(crate) fn import_credentials(
         Ok(status) if status.success() => {}
         _ => {
             return Err(
-                "GPG is not installed or not found in PATH. Install GPG to use import.".into(),
+                "GPG is not installed or not found in PATH. Install GPG to import .csv.gpg files."
+                    .into(),
             );
         }
     }
 
-    // Warning and confirmation
     ui::warning_block(&[
-        "This will import credentials from a GPG-encrypted CSV file.",
+        "This will import credentials from a GPG-encrypted CSV file (legacy format).",
         "Existing credentials with the same service name will be OVERWRITTEN.",
+        "Note: .sk2backup uses a stronger KDF and is the recommended format for new backups.",
     ]);
     println!();
     let answer = vault::prompt("Type 'yes' to continue: ");
@@ -84,7 +131,6 @@ pub(crate) fn import_credentials(
         return Err("Import cancelled.".into());
     }
 
-    // Decrypt via GPG
     let output = process::Command::new("gpg")
         .arg("--decrypt")
         .arg("--quiet")
@@ -97,14 +143,11 @@ pub(crate) fn import_credentials(
         return Err(format!("GPG decryption failed: {}", stderr.trim()));
     }
 
-    // Wrap plaintext in Zeroizing
     let csv = Zeroizing::new(
         String::from_utf8(output.stdout).map_err(|_| "Decrypted file contains invalid UTF-8.")?,
     );
 
     let mut lines = csv.lines();
-
-    // Validate header
     let header = lines.next().ok_or("CSV file is empty.")?;
     if header != "name,username,password" && header != "name,username,password,notes,url" {
         return Err(format!(
@@ -112,12 +155,11 @@ pub(crate) fn import_credentials(
         ));
     }
 
-    // Parse and store each row
     let mut imported = 0usize;
     let mut skipped = 0usize;
 
     for (i, line) in lines.enumerate() {
-        let line_num = i + 2; // 1-indexed, header is line 1
+        let line_num = i + 2;
 
         if line.trim().is_empty() {
             continue;

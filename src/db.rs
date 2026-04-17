@@ -91,6 +91,25 @@ pub(crate) fn add_credential(
     .expect("Failed to store credential");
 }
 
+#[cfg(feature = "import")]
+pub(crate) fn upsert_credential_tx(
+    tx: &rusqlite::Transaction,
+    key: &[u8; KEY_LEN],
+    service: &str,
+    username: &str,
+    password: &str,
+    notes: &str,
+    url: &str,
+) -> Result<(), rusqlite::Error> {
+    let (nonce, ciphertext) = crypto::encrypt(key, service, username, password, notes, url);
+    tx.execute(
+        "INSERT OR REPLACE INTO credentials (service, nonce, ciphertext, updated_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![service, nonce, ciphertext, unix_now()],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn get_credential(
     conn: &Connection,
     key: &[u8; KEY_LEN],

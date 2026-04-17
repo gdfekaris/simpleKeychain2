@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-## Version 1.0.0
+## Version 1.1.0
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -243,9 +243,12 @@ This is useful for maintaining separate vaults (work vs. personal), scripting, o
 
 ## Creating Backups
 
-sk2 can export all your credentials into a GPG-encrypted CSV file. The plaintext is never written to disk — it is piped directly from sk2 to GPG in memory.
+sk2 can export all your credentials into an encrypted backup file. Two formats are supported:
 
-Requires [GPG](https://gnupg.org/) to be installed and in your `PATH`.
+- **SK2B** (default) — native sk2 backup using Argon2id + XChaCha20-Poly1305. Self-contained, needs no external tools, and is byte-compatible with the iOS sk2 mobile app.
+- **GPG** (legacy) — GPG-encrypted CSV. Requires [GPG](https://gnupg.org/) in your `PATH`. Uses a weaker KDF than SK2B; kept for compatibility with older exports.
+
+Plaintext is never written to disk in either format — the output file is opened with `O_EXCL | O_CREAT` at mode `0600`, and the decrypted credentials live only in zeroed memory.
 
 ### Basic export
 
@@ -253,17 +256,45 @@ Requires [GPG](https://gnupg.org/) to be installed and in your `PATH`.
 sk2 export
 ```
 
-This creates `sk2-export.csv.gpg` in your current directory. GPG will prompt you to set a passphrase for the export file.
+This creates `sk2-export.sk2backup` in your current directory and prompts you (twice) for a backup passphrase — you're also asked to type `yes` to confirm before anything is written.
 
 To choose a different output path:
 
 ```bash
-sk2 export -o /mnt/usb/backup.csv.gpg
+sk2 export -o /mnt/usb/backup.sk2backup
 ```
+
+If the output file already exists, the command fails rather than clobbering it. Pass `--overwrite` to replace an existing file (the old file is unlinked and recreated with `O_EXCL`, so a planted symlink cannot survive the race):
+
+```bash
+sk2 export -o backup.sk2backup --overwrite
+```
+
+### Choosing a format
+
+Use `--format` to pick explicitly, or let sk2 infer it from the output extension:
+
+```bash
+sk2 export                                   # SK2B, default filename
+sk2 export --format sk2b                     # SK2B, default filename
+sk2 export --format gpg                      # legacy GPG, default is sk2-export.csv.gpg
+sk2 export -o backup.sk2backup               # inferred: SK2B
+sk2 export -o backup.csv.gpg                 # inferred: GPG
+```
+
+If `--output` has an unrecognized extension and `--format` isn't set, sk2 refuses to guess.
 
 ### Decrypting the backup
 
-No sk2 needed — just GPG:
+**SK2B** files can only be restored with sk2 itself (or the iOS sk2 mobile app):
+
+```bash
+sk2 import sk2-export.sk2backup
+```
+
+There is no standalone decryptor for `.sk2backup` — the format is sk2-specific. If you need a human-readable export, use `--format gpg` instead.
+
+**GPG** files can be decrypted with GPG directly, no sk2 required:
 
 ```bash
 gpg -d sk2-export.csv.gpg > credentials.csv
@@ -275,7 +306,9 @@ The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Notes 
 
 If you want to be thorough about minimizing exposure:
 
-- **Decrypt to a RAM-backed filesystem.** Decrypting to RAM avoids writing plaintext to a physical disk where it could be recovered after deletion.
+- **Prefer SK2B when you don't need a human-readable CSV.** The plaintext only ever exists inside `sk2 import`, which holds it in zeroed memory. The GPG path produces a plaintext CSV the moment you decrypt it, and from that point on secure deletion is your problem.
+
+- **If you decrypt a GPG export, decrypt to a RAM-backed filesystem.** Decrypting to RAM avoids writing plaintext to a physical disk where it could be recovered after deletion.
 
   Linux/macOS (`/tmp` is often a tmpfs):
   ```bash
@@ -289,7 +322,7 @@ If you want to be thorough about minimizing exposure:
   # use the file, then delete it — or simply unmount the RAM disk
   ```
 
-- **Securely delete the decrypted file.** Regular deletion only removes the directory entry — the data remains on disk until overwritten.
+- **Securely delete any decrypted CSV.** Regular deletion only removes the directory entry — the data remains on disk until overwritten.
 
   Linux/macOS:
   ```bash
@@ -302,64 +335,77 @@ If you want to be thorough about minimizing exposure:
   ```
   Note: secure deletion is ineffective on copy-on-write filesystems (ZFS, Btrfs) and SSDs with wear leveling, which is why decrypting to a RAM-backed filesystem is the safer option.
 
-- **Export directly to removable media.** Write the `.gpg` file to a USB drive, then physically disconnect it:
+- **Export directly to removable media.** Write the backup file to a USB drive, then physically disconnect it:
   ```bash
-  sk2 export -o /mnt/usb/sk2-export.csv.gpg        # Linux/macOS
-  sk2 export -o E:\sk2-export.csv.gpg               # Windows
+  sk2 export -o /mnt/usb/sk2-export.sk2backup      # Linux/macOS
+  sk2 export -o E:\sk2-export.sk2backup             # Windows
   ```
-- **Verify the backup.** After exporting, confirm you can decrypt it before relying on it:
+- **Verify the backup.** After exporting, confirm you can restore it before relying on it. For SK2B, do a dry run against a throwaway vault:
+  ```bash
+  SK2_VAULT=/tmp/verify.db sk2 init
+  SK2_VAULT=/tmp/verify.db sk2 import sk2-export.sk2backup
+  rm /tmp/verify.db
+  ```
+  For GPG:
   ```bash
   gpg -d sk2-export.csv.gpg | head -2               # Linux/macOS
   ```
   ```powershell
   gpg -d sk2-export.csv.gpg | Select-Object -First 2   # Windows (PowerShell)
   ```
-- **Use a different passphrase.** GPG will prompt you to choose a passphrase for the export file. Don't reuse your vault master password — if someone obtains both the vault file and the export file, one password shouldn't unlock both.
+- **Use a different passphrase.** Whether you pick SK2B or GPG, the backup passphrase is independent of your vault master password. Don't reuse them — if someone obtains both the vault file and the backup file, one password shouldn't unlock both.
 
 ### Disabling export
 
 The export feature is included by default. If you don't want the export command in your binary at all (e.g., to eliminate bulk credential extraction as an attack surface), compile without it:
 
 ```bash
-cargo build --release --no-default-features
+cargo build --release --no-default-features --features import   # import only, no export
+cargo build --release --no-default-features                     # neither export nor import
 ```
 
 This removes the `export` subcommand entirely — it won't appear in `--help` and the code is excluded from the binary.
 
 ## Restoring from Backup
 
-sk2 can import credentials from a GPG-encrypted CSV file (the same format `export` produces). Requires [GPG](https://gnupg.org/) in your `PATH`.
+sk2 can import credentials from either backup format `export` produces. The format is autodetected by reading the first four bytes of the file — files starting with the `SK2B` magic go through the native importer; anything else is treated as a GPG-encrypted CSV and handed to `gpg --decrypt` (requires [GPG](https://gnupg.org/) in your `PATH`).
 
-The expected CSV format is `name,username,password,notes,url`. Files exported by older versions of sk2 with only three columns (`name,username,password`) are also accepted — notes and URL will be left empty for those rows.
+Both formats accept the 5-column schema `name,username,password,notes,url`. The legacy GPG path additionally accepts older 3-column exports (`name,username,password`) — notes and URL will be left empty for those rows. SK2B requires all 5 columns.
 
 ### Basic import
 
 ```bash
-sk2 import sk2-export.csv.gpg
+sk2 import sk2-export.sk2backup        # SK2B (native)
+sk2 import sk2-export.csv.gpg          # legacy GPG CSV
 ```
 
-GPG will prompt for the passphrase used when the file was exported. You'll then be asked to confirm before any credentials are written.
+For SK2B, sk2 prompts directly for the backup passphrase (`rpassword`, never echoed). For GPG, decryption happens in `gpg` and its own pinentry handles the prompt. In both cases you must type `yes` to confirm before any credentials are written.
 
-If a service in the CSV already exists in your vault, it will be silently overwritten. Services not mentioned in the CSV are left untouched.
+If a service in the backup already exists in your vault, it will be silently overwritten. Services not mentioned in the backup are left untouched.
 
-Import can also be used to recover individual corrupt credentials found by `sk2 verify` — you don't need to wipe the vault first. Run `sk2 import <backup.csv.gpg>` against your live vault and only the affected credentials will be overwritten.
+Import can also be used to recover individual corrupt credentials found by `sk2 verify` — you don't need to wipe the vault first. Run `sk2 import <backup>` against your live vault and only the affected credentials will be overwritten.
+
+### Transactional vs. best-effort
+
+- **SK2B imports are transactional.** All rows are inserted inside a single SQLite transaction; if any row fails to parse or insert, the transaction rolls back and your vault is left exactly as it was. Partial imports never land.
+- **GPG imports are best-effort.** Malformed rows are reported and skipped, and successfully parsed rows are committed as they go. This preserves the behavior of older sk2 exports, which may contain stray lines from hand-edited CSVs.
 
 ### Round-trip example
 
 ```bash
-sk2 export -o backup.csv.gpg    # export from old vault
-rm ~/.sk2/vault.db               # start fresh (or move to a new machine)
-sk2 init                         # set up a new vault
-sk2 import backup.csv.gpg       # restore all credentials
+sk2 export -o backup.sk2backup       # export from old vault
+rm ~/.sk2/vault.db                    # start fresh (or move to a new machine)
+sk2 init                              # set up a new vault
+sk2 import backup.sk2backup          # restore all credentials
 ```
 
 ### Security during import
 
-- **Decryption happens in GPG** — sk2 invokes `gpg --decrypt` and reads the output. The encrypted file is never parsed directly by sk2.
-- **Plaintext is held in zeroed memory** — The decrypted CSV is wrapped in `Zeroizing<String>` and automatically wiped from memory when the import completes (or on any error).
-- **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the CSV.
+- **Decryption stays in trusted code paths.** SK2B is decrypted in-process with `XChaCha20-Poly1305` after deriving the backup key via Argon2id; authentication failure aborts the import. GPG backups are handed to `gpg --decrypt`, and sk2 never parses the encrypted bytes itself.
+- **Plaintext is held in zeroed memory** — The decrypted CSV (and, for SK2B, the entire decrypted blob) is wrapped in `Zeroizing` and automatically wiped from memory when the import completes (or on any error).
+- **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the backup.
 - **Master password required** — The vault must be unlocked before import begins, same as every other command.
-- **Timestamps reset on import** — Imported credentials receive a last-updated timestamp of the moment of import. The CSV format does not carry age information, so sk2 has no way to know when each password was originally set. This means `sk2 list --stale` will measure staleness from the import date, not from when the passwords were created. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
+- **Timestamps reset on import** — Imported credentials receive a last-updated timestamp of the moment of import. Neither backup format carries age information, so sk2 has no way to know when each password was originally set. This means `sk2 list --stale` will measure staleness from the import date, not from when the passwords were created. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
 
 ### Disabling import
 
@@ -394,6 +440,7 @@ To run tests for a specific module:
 ```bash
 cargo test crypto::tests
 cargo test db::tests
+cargo test backup::tests
 cargo test import::tests
 cargo test export::tests
 ```
