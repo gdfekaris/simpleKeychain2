@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Advisories are published against dependency trees that have not changed, so
+  # a push-only trigger would never see them. Weekly, Mondays 06:00 UTC.
+  # This also re-runs the build against whatever `stable` has become, which
+  # catches toolchain regressions between commits.
+  schedule:
+    - cron: '0 6 * * 1'
 
 jobs:
   check:
@@ -40,3 +46,26 @@ jobs:
 
       - name: Test (no default features)
         run: cargo test --no-default-features
+
+  audit:
+    name: Security advisories
+    # Single runner: the dependency tree is platform-independent, so the OS
+    # matrix would audit the same Cargo.lock three times.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Prebuilt binary — building cargo-audit from source takes ~3 minutes.
+      - uses: taiki-e/install-action@cargo-audit
+
+      # --deny warnings also fails on informational advisories (unsound,
+      # unmaintained), not just vulnerabilities. Deliberate for a password
+      # manager: a finding should force a decision rather than scroll past.
+      # To retire one after triage, add it to audit.toml:
+      #   [advisories]
+      #   ignore = ["RUSTSEC-YYYY-NNNN"]  # with a comment saying why
+      - name: cargo audit
+        run: cargo audit --deny warnings
