@@ -247,4 +247,37 @@ mod tests {
     fn escape_newlines() {
         assert_eq!(csv_escape("line1\nline2"), "\"line1\nline2\"");
     }
+
+    /// F1 regression, end to end across the module boundary: what `export_gpg` writes
+    /// must survive the parser `import_gpg` reads it back with. `escape_newlines`
+    /// above only pins the escaper's output; this pins the two halves against each
+    /// other, which is where F1 actually lived.
+    #[test]
+    #[cfg(feature = "import")]
+    fn escaped_multiline_note_reparses() {
+        let note = "recovery codes:\n  1111-2222\n  3333-4444";
+        let fields = [
+            "gmail",
+            "me@x.com",
+            "hunter2",
+            note,
+            "https://mail.google.com",
+        ];
+
+        let mut csv = String::from("name,username,password,notes,url\n");
+        for field in fields {
+            csv.push_str(&csv_escape(field));
+            csv.push(',');
+        }
+        csv.pop();
+        csv.push('\n');
+
+        let records = crate::backup::parse_csv_records(&csv).unwrap();
+        assert_eq!(
+            records.len(),
+            2,
+            "header + one credential, not one per line"
+        );
+        assert_eq!(records[1], fields, "every field round-trips intact");
+    }
 }

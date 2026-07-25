@@ -9,43 +9,63 @@ use crate::db;
 use crate::ui;
 use crate::vault;
 
-fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
-    let mut fields = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
+/// Parse and validate a decrypted GPG CSV export, returning the accepted records
+/// and the number skipped.
+///
+/// Parsing is whole-text via `backup::parse_csv_records` rather than line-scoped:
+/// `export::csv_escape` quotes fields but cannot escape newlines, so a note
+/// containing `\n` is written as a real newline inside a quoted field. Splitting on
+/// lines before parsing tore such a record into fragments that each failed to parse,
+/// silently dropping the whole credential.
+///
+/// Once embedded newlines are in play a syntax error is no longer attributable to a
+/// single row — everything after it is misaligned — so a bad quote aborts the import.
+/// Per-row problems that *are* localizable (wrong field count, empty service name)
+/// still warn and skip, preserving the legacy importer's best-effort behavior.
+fn parse_gpg_csv(csv: &str) -> Result<(Vec<Vec<String>>, usize), String> {
+    let records = backup::parse_csv_records(csv).map_err(|e| {
+        format!("CSV parse error: {e}. Nothing was imported — the file may be corrupt or may not be an sk2 export.")
+    })?;
 
-    while let Some(ch) = chars.next() {
-        if in_quotes {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    current.push('"');
-                } else {
-                    in_quotes = false;
-                }
-            } else {
-                current.push(ch);
-            }
-        } else if ch == '"' {
-            if current.is_empty() {
-                in_quotes = true;
-            } else {
-                return Err("unexpected quote in unquoted field".into());
-            }
-        } else if ch == ',' {
-            fields.push(std::mem::take(&mut current));
-        } else {
-            current.push(ch);
+    let mut iter = records.into_iter();
+    let header = iter.next().ok_or("CSV file is empty.")?;
+    let header_str = header.join(",");
+    if header_str != "name,username,password" && header_str != "name,username,password,notes,url" {
+        return Err(format!(
+            "Invalid CSV header. Expected 'name,username,password,notes,url', got '{header_str}'."
+        ));
+    }
+
+    let mut accepted = Vec::new();
+    let mut skipped = 0usize;
+
+    for (i, fields) in iter.enumerate() {
+        // Records, not lines: a note with newlines is still one record.
+        let row_num = i + 1;
+
+        if fields.len() == 1 && fields[0].trim().is_empty() {
+            continue;
         }
+
+        if fields.len() != 3 && fields.len() != 5 {
+            ui::warning(&format!(
+                "Row {row_num}: expected 3 or 5 fields, got {}, skipping.",
+                fields.len()
+            ));
+            skipped += 1;
+            continue;
+        }
+
+        if fields[0].is_empty() {
+            ui::warning(&format!("Row {row_num}: empty service name, skipping."));
+            skipped += 1;
+            continue;
+        }
+
+        accepted.push(fields);
     }
 
-    if in_quotes {
-        return Err("unterminated quoted field".into());
-    }
-
-    fields.push(current);
-    Ok(fields)
+    Ok((accepted, skipped))
 }
 
 fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
@@ -147,61 +167,20 @@ fn import_gpg(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(), 
         String::from_utf8(output.stdout).map_err(|_| "Decrypted file contains invalid UTF-8.")?,
     );
 
-    let mut lines = csv.lines();
-    let header = lines.next().ok_or("CSV file is empty.")?;
-    if header != "name,username,password" && header != "name,username,password,notes,url" {
-        return Err(format!(
-            "Invalid CSV header. Expected 'name,username,password,notes,url', got '{header}'."
-        ));
-    }
+    // Parse and validate everything before writing anything, so a malformed file
+    // cannot leave a half-populated vault.
+    let (records, skipped) = parse_gpg_csv(&csv)?;
 
-    let mut imported = 0usize;
-    let mut skipped = 0usize;
-
-    for (i, line) in lines.enumerate() {
-        let line_num = i + 2;
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let fields = match parse_csv_line(line) {
-            Ok(f) => f,
-            Err(e) => {
-                ui::warning(&format!("Line {line_num}: {e}, skipping."));
-                skipped += 1;
-                continue;
-            }
-        };
-
-        if fields.len() != 3 && fields.len() != 5 {
-            ui::warning(&format!(
-                "Line {line_num}: expected 3 or 5 fields, got {}, skipping.",
-                fields.len()
-            ));
-            skipped += 1;
-            continue;
-        }
-
-        let service = &fields[0];
-        let username = &fields[1];
-        let password = &fields[2];
-        let notes = fields.get(3).map(|s| s.as_str()).unwrap_or("");
-        let url = fields.get(4).map(|s| s.as_str()).unwrap_or("");
-
-        if service.is_empty() {
-            ui::warning(&format!("Line {line_num}: empty service name, skipping."));
-            skipped += 1;
-            continue;
-        }
-
-        db::add_credential(conn, key, service, username, password, notes, url);
-        imported += 1;
-    }
-
-    if imported == 0 && skipped == 0 {
+    if records.is_empty() && skipped == 0 {
         return Err("No credentials found in CSV file.".into());
     }
+
+    for fields in &records {
+        let notes = fields.get(3).map(|s| s.as_str()).unwrap_or("");
+        let url = fields.get(4).map(|s| s.as_str()).unwrap_or("");
+        db::add_credential(conn, key, &fields[0], &fields[1], &fields[2], notes, url);
+    }
+    let imported = records.len();
 
     println!();
     ui::success(&format!("Imported {imported} credential(s)."));
@@ -217,74 +196,141 @@ fn import_gpg(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(), 
 mod tests {
     use super::*;
 
+    /// F1 regression. `export::csv_escape` quotes fields but writes newlines raw, so a
+    /// multi-line note lands as a real newline inside a quoted field. The old
+    /// line-scoped parser split on those newlines *before* parsing, tearing this single
+    /// record into three unparseable fragments and dropping the whole credential —
+    /// username and password included — while reporting "Imported 0 credential(s)".
+    ///
+    /// The CSV below is byte-for-byte what `export::export_gpg` writes for this entry.
     #[test]
-    fn simple_unquoted() {
-        let fields = parse_csv_line("a,b,c").unwrap();
-        assert_eq!(fields, vec!["a", "b", "c"]);
+    fn multiline_notes_survive() {
+        let csv = concat!(
+            "name,username,password,notes,url\n",
+            "\"gmail\",\"me@x.com\",\"hunter2\",",
+            "\"recovery codes:\n  1111-2222\n  3333-4444\",",
+            "\"https://mail.google.com\"\n",
+        );
+
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 1, "one credential, not one record per line");
+        assert_eq!(records[0][0], "gmail");
+        assert_eq!(records[0][1], "me@x.com");
+        assert_eq!(records[0][2], "hunter2");
+        assert_eq!(records[0][3], "recovery codes:\n  1111-2222\n  3333-4444");
+        assert_eq!(records[0][4], "https://mail.google.com");
     }
 
     #[test]
-    fn quoted_fields() {
-        let fields = parse_csv_line("\"hello\",\"world\"").unwrap();
-        assert_eq!(fields, vec!["hello", "world"]);
+    fn five_column_header_accepted() {
+        let csv = "name,username,password,notes,url\nsvc,user,pass,note,https://example.com\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].len(), 5);
+        assert_eq!(records[0][4], "https://example.com");
     }
 
     #[test]
-    fn escaped_quotes() {
-        let fields = parse_csv_line("\"he said \"\"hi\"\"\"").unwrap();
-        assert_eq!(fields, vec!["he said \"hi\""]);
+    fn legacy_three_column_header_accepted() {
+        let csv = "name,username,password\nsvc,user,pass\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].len(),
+            3,
+            "notes/url default to empty at the call site"
+        );
+    }
+
+    /// The header check and the per-row field count are independent, matching
+    /// `backup::import_vault`.
+    #[test]
+    fn five_column_header_with_three_field_rows() {
+        let csv = "name,username,password,notes,url\nsvc,user,pass\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 1);
     }
 
     #[test]
-    fn commas_inside_quotes() {
-        let fields = parse_csv_line("\"a,b\",c").unwrap();
-        assert_eq!(fields, vec!["a,b", "c"]);
+    fn quoted_commas_and_escaped_quotes() {
+        let csv = "name,username,password\n\"a,b\",\"he said \"\"hi\"\"\",\"p,w\"\n";
+        let (records, _) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(records[0][0], "a,b");
+        assert_eq!(records[0][1], "he said \"hi\"");
+        assert_eq!(records[0][2], "p,w");
     }
 
     #[test]
-    fn empty_fields() {
-        let fields = parse_csv_line(",,").unwrap();
-        assert_eq!(fields, vec!["", "", ""]);
+    fn crlf_line_endings() {
+        let csv = "name,username,password\r\nsvc,user,pass\r\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0][2], "pass");
     }
 
     #[test]
-    fn unterminated_quote() {
-        let result = parse_csv_line("\"unterminated");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unterminated"));
+    fn blank_lines_ignored() {
+        let csv = "name,username,password\n\nsvc,user,pass\n\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(skipped, 0, "blank lines are not malformed rows");
+        assert_eq!(records.len(), 1);
     }
 
     #[test]
-    fn mid_field_quote() {
-        let result = parse_csv_line("ab\"cd");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unexpected quote"));
+    fn wrong_field_count_skipped() {
+        let csv = "name,username,password\nsvc,user,pass\na,b\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(records.len(), 1, "good row still imports");
+        assert_eq!(skipped, 1);
     }
 
     #[test]
-    fn single_field() {
-        let fields = parse_csv_line("hello").unwrap();
-        assert_eq!(fields, vec!["hello"]);
+    fn empty_service_skipped() {
+        let csv = "name,username,password\n\"\",user,pass\nsvc,user,pass\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(skipped, 1);
+    }
+
+    /// A broken quote desynchronizes every record after it, so it is not attributable
+    /// to one row. Aborting is why `import_gpg` parses fully before it writes anything.
+    #[test]
+    fn unterminated_quote_aborts() {
+        let csv = "name,username,password\n\"unterminated,user,pass\n";
+        let err = parse_gpg_csv(csv).unwrap_err();
+        assert!(err.contains("unterminated quoted field"), "got: {err}");
     }
 
     #[test]
-    fn empty_string() {
-        let fields = parse_csv_line("").unwrap();
-        assert_eq!(fields, vec![""]);
+    fn mid_field_quote_aborts() {
+        let csv = "name,username,password\nab\"cd,user,pass\n";
+        let err = parse_gpg_csv(csv).unwrap_err();
+        assert!(err.contains("unexpected quote"), "got: {err}");
     }
 
     #[test]
-    fn five_field_row() {
-        let fields = parse_csv_line("svc,user,pass,notes,https://example.com").unwrap();
-        assert_eq!(fields.len(), 5);
-        assert_eq!(fields[0], "svc");
-        assert_eq!(fields[4], "https://example.com");
+    fn bad_header_rejected() {
+        let csv = "service,login,secret\nsvc,user,pass\n";
+        let err = parse_gpg_csv(csv).unwrap_err();
+        assert!(err.contains("Invalid CSV header"), "got: {err}");
     }
 
     #[test]
-    fn newline_inside_quotes() {
-        let fields = parse_csv_line("\"line1\nline2\",b").unwrap();
-        assert_eq!(fields[0], "line1\nline2");
-        assert_eq!(fields[1], "b");
+    fn empty_input_rejected() {
+        let err = parse_gpg_csv("").unwrap_err();
+        assert!(err.contains("empty"), "got: {err}");
+    }
+
+    #[test]
+    fn header_only_yields_nothing() {
+        let csv = "name,username,password,notes,url\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert!(records.is_empty());
+        assert_eq!(skipped, 0, "caller reports 'No credentials found'");
     }
 }

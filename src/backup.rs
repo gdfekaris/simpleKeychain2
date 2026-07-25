@@ -17,8 +17,11 @@ fn csv_escape(field: &str) -> String {
     format!("\"{}\"", field.replace('"', "\"\""))
 }
 
+/// Whole-text RFC 4180 parser. Unlike a line-scoped parser it tracks quote state
+/// across newlines, so a field containing `\n` (notes with recovery codes, say)
+/// survives the round trip. Shared by both importers — see `import::parse_gpg_csv`.
 #[cfg(feature = "import")]
-fn parse_csv_records(text: &str) -> Result<Vec<Vec<String>>, String> {
+pub(crate) fn parse_csv_records(text: &str) -> Result<Vec<Vec<String>>, String> {
     let mut records = Vec::new();
     let mut fields = Vec::new();
     let mut current = String::new();
@@ -253,6 +256,15 @@ mod tests {
             ),
             ("Quotes\"Here", "user", "p\"word", "note\"s", ""),
             ("Commas,Here", "u,ser", "p,ass", "", "https://example.com"),
+            // The failure mode F1 found in the GPG path. SK2B parses whole-text and
+            // was always correct here, but nothing pinned it.
+            (
+                "Multiline",
+                "user",
+                "pass",
+                "recovery codes:\n  1111-2222\n  3333-4444",
+                "",
+            ),
         ];
         for (svc, u, p, n, url) in &credentials {
             db::add_credential(&conn, &TEST_KEY, svc, u, p, n, url);
@@ -262,7 +274,7 @@ mod tests {
 
         let conn2 = setup();
         let count = import_vault(&conn2, &TEST_KEY, &blob, "roundtrip_pass").unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
 
         for (svc, u, p, n, url) in &credentials {
             let (got_u, got_p, got_n, got_url, _) = db::get_credential(&conn2, &TEST_KEY, svc)
@@ -441,6 +453,37 @@ mod tests {
         let (u, p, _, _, _) = db::get_credential(&target, &TEST_KEY, "existing").unwrap();
         assert_eq!(u, "eu");
         assert_eq!(p, "ep");
+    }
+
+    /// SK2B import accepts the legacy 3-column header and 3-field rows, not just
+    /// the 5-column schema `export_vault` writes. Pinned because the docs
+    /// previously disagreed with each other on this point.
+    #[test]
+    fn m13_import_accepts_legacy_three_column() {
+        let csv = "name,username,password\n\
+                   legacy_svc,legacy_user,legacy_pass\n";
+
+        let mut salt = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt);
+        let backup_key = crypto::derive_key("bp", &salt);
+        let (nonce, ciphertext) = crypto::encrypt_raw(&backup_key, csv.as_bytes());
+
+        let mut blob = Vec::with_capacity(HEADER_LEN + ciphertext.len());
+        blob.extend_from_slice(&BACKUP_MAGIC);
+        blob.push(BACKUP_VERSION);
+        blob.extend_from_slice(&salt);
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ciphertext);
+
+        let target = setup();
+        let count = import_vault(&target, &TEST_KEY, &blob, "bp").unwrap();
+        assert_eq!(count, 1);
+
+        let (u, p, n, url, _) = db::get_credential(&target, &TEST_KEY, "legacy_svc").unwrap();
+        assert_eq!(u, "legacy_user");
+        assert_eq!(p, "legacy_pass");
+        assert_eq!(n, "", "notes should default to empty for 3-column rows");
+        assert_eq!(url, "", "url should default to empty for 3-column rows");
     }
 
     #[test]

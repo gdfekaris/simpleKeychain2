@@ -17,7 +17,7 @@ Requires [Rust](https://www.rust-lang.org/tools/install) (1.85+).
 
 ```bash
 git clone https://github.com/gdfekaris/simpleKeychain2.git
-cd sk2-dev
+cd simpleKeychain2
 cargo build --release
 ```
 
@@ -370,7 +370,9 @@ This removes the `export` subcommand entirely — it won't appear in `--help` an
 
 sk2 can import credentials from either backup format `export` produces. The format is autodetected by reading the first four bytes of the file — files starting with the `SK2B` magic go through the native importer; anything else is treated as a GPG-encrypted CSV and handed to `gpg --decrypt` (requires [GPG](https://gnupg.org/) in your `PATH`).
 
-Both formats accept the 5-column schema `name,username,password,notes,url`. The legacy GPG path additionally accepts older 3-column exports (`name,username,password`) — notes and URL will be left empty for those rows. SK2B requires all 5 columns.
+Both formats accept the 5-column schema `name,username,password,notes,url` and older 3-column exports (`name,username,password`) — notes and URL are left empty for 3-column rows. Export always writes 5 columns; 3-column support exists only for reading backups made by older versions of sk2.
+
+The two importers differ in how strictly they treat a bad row, not in which schemas they accept — see [Transactional vs. best-effort](#transactional-vs-best-effort) below.
 
 ### Basic import
 
@@ -388,7 +390,9 @@ Import can also be used to recover individual corrupt credentials found by `sk2 
 ### Transactional vs. best-effort
 
 - **SK2B imports are transactional.** All rows are inserted inside a single SQLite transaction; if any row fails to parse or insert, the transaction rolls back and your vault is left exactly as it was. Partial imports never land.
-- **GPG imports are best-effort.** Malformed rows are reported and skipped, and successfully parsed rows are committed as they go. This preserves the behavior of older sk2 exports, which may contain stray lines from hand-edited CSVs.
+- **GPG imports are best-effort within a valid file.** Rows with the wrong number of fields or an empty service name are reported and skipped, and the rest are imported. This preserves the behavior of older sk2 exports, which may contain stray lines from hand-edited CSVs.
+
+  A *malformed quote* is the exception: because notes may legitimately contain newlines, a stray or unterminated quote misaligns every record after it, so it cannot be attributed to a single row. The whole import aborts with an error and nothing is written. Both formats parse the entire file before touching the vault, so a rejected file never leaves it half-populated.
 
 ### Round-trip example
 
@@ -421,7 +425,7 @@ cargo build --release --no-default-features                     # neither export
 - **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
 - **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory when no longer needed, including on error paths (e.g. wrong password, empty input).
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
-- **File permissions** — On Linux/macOS, `~/.sk2/` is set to `0700` and `vault.db` to `0600` (owner-only access) on every run.
+- **File permissions** — On Linux/macOS, sk2 applies a process-wide `umask` of `0077` before touching the filesystem, so everything it creates is owner-only from the moment it exists. `~/.sk2/` is created directly at `0700`, `vault.db` inherits `0600`, and backup files are opened with an explicit `0600` mode. Permissions are established at creation time rather than tightened afterward, which removes the window in which a newly created file would be briefly readable by others. On Windows, files inherit default ACLs — there is no equivalent hardening.
 - **Vault location** — By default, the vault is stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). Override with `--vault` or the `SK2_VAULT` environment variable (flag takes precedence). Parent directories are created automatically.
 - **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
 - **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts. If a credential fails: restore it from a backup with `sk2 import`, or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
