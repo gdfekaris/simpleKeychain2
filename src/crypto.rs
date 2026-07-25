@@ -17,14 +17,105 @@ struct Credential {
     url: Option<String>,
 }
 
-pub(crate) fn derive_key(master_password: &str, salt: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
-    let params = Params::new(MEMORY_COST, TIME_COST, PARALLELISM, Some(KEY_LEN))
-        .expect("Invalid Argon2 params");
+/// Argon2id cost parameters for a single key derivation.
+///
+/// Constructible only via [`KdfParams::CURRENT`], [`KdfParams::SK2B_V1`], or
+/// [`KdfParams::validated`], so a combination Argon2 would reject can never reach
+/// [`derive_key`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct KdfParams {
+    time_cost: u32,
+    memory_cost: u32,
+    parallelism: u32,
+}
+
+impl KdfParams {
+    /// What this build writes into new vaults, and what `change-password` migrates an
+    /// existing vault to.
+    ///
+    /// Safe to raise. Every vault records the parameters it was created with, and
+    /// `vault::unlock_vault` derives using *those* (via `db::load_params`) rather than
+    /// these — so raising them locks nobody out. Users pick up the stronger parameters
+    /// by running `change-password`.
+    pub(crate) const CURRENT: Self = Self {
+        time_cost: TIME_COST,
+        memory_cost: MEMORY_COST,
+        parallelism: PARALLELISM,
+    };
+
+    /// Parameters frozen into the SK2B v1 container format.
+    ///
+    /// Deliberately written as literals rather than as `CURRENT`. The SK2B header is
+    /// magic + version + salt + nonce — it has **no parameter field** — so these values
+    /// are part of the format itself. Every `.sk2backup` ever written and the iOS
+    /// `sk2-core` build assume exactly these.
+    ///
+    /// Changing them would silently make existing backups undecryptable, which is the
+    /// same trap `CURRENT` was just freed from. Raising the KDF cost for backups
+    /// requires `BACKUP_VERSION` 0x02 carrying the parameters in the header, plus a
+    /// matching change on iOS.
+    ///
+    /// Gated like the `backup` module itself — with neither feature there is no SK2B
+    /// container to derive keys for.
+    #[cfg(any(feature = "export", feature = "import"))]
+    pub(crate) const SK2B_V1: Self = Self {
+        time_cost: 4,
+        memory_cost: 128 * 1024,
+        parallelism: 4,
+    };
+
+    /// Parameters read back out of a vault's metadata row.
+    ///
+    /// Rejects values Argon2 cannot accept, so a corrupt or hand-edited row produces a
+    /// diagnosable error instead of a panic inside `derive_key`.
+    pub(crate) fn validated(
+        time_cost: u32,
+        memory_cost: u32,
+        parallelism: u32,
+    ) -> Result<Self, String> {
+        Params::new(memory_cost, time_cost, parallelism, Some(KEY_LEN)).map_err(|e| {
+            format!(
+                "Vault metadata holds Argon2 parameters this build cannot use \
+                 (time_cost={time_cost}, memory_cost={memory_cost}, parallelism={parallelism}): {e}"
+            )
+        })?;
+        Ok(Self {
+            time_cost,
+            memory_cost,
+            parallelism,
+        })
+    }
+
+    pub(crate) fn time_cost(&self) -> u32 {
+        self.time_cost
+    }
+
+    pub(crate) fn memory_cost(&self) -> u32 {
+        self.memory_cost
+    }
+
+    pub(crate) fn parallelism(&self) -> u32 {
+        self.parallelism
+    }
+}
+
+/// Derive a 256-bit key. `kdf` is explicit at every call site so that the choice
+/// between "this vault's recorded parameters" and "the parameters this format pins"
+/// is always a conscious one — see [`KdfParams`].
+pub(crate) fn derive_key(password: &str, salt: &[u8], kdf: KdfParams) -> Zeroizing<[u8; KEY_LEN]> {
+    // Infallible: a KdfParams value only exists if Params::new already accepted it.
+    let params = Params::new(
+        kdf.memory_cost,
+        kdf.time_cost,
+        kdf.parallelism,
+        Some(KEY_LEN),
+    )
+    .expect("KdfParams invariant violated");
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     let mut key = Zeroizing::new([0u8; KEY_LEN]);
     argon2
-        .hash_password_into(master_password.as_bytes(), salt, &mut *key)
+        .hash_password_into(password.as_bytes(), salt, &mut *key)
         .expect("Key derivation failed");
     key
 }
@@ -209,24 +300,101 @@ mod tests {
     #[test]
     fn derive_key_deterministic() {
         let salt = b"fixed_salt_16byt";
-        let k1 = derive_key("password", salt);
-        let k2 = derive_key("password", salt);
+        let k1 = derive_key("password", salt, KdfParams::CURRENT);
+        let k2 = derive_key("password", salt, KdfParams::CURRENT);
         assert_eq!(*k1, *k2);
     }
 
     #[test]
     fn derive_key_different_password() {
         let salt = b"fixed_salt_16byt";
-        let k1 = derive_key("password1", salt);
-        let k2 = derive_key("password2", salt);
+        let k1 = derive_key("password1", salt, KdfParams::CURRENT);
+        let k2 = derive_key("password2", salt, KdfParams::CURRENT);
         assert_ne!(*k1, *k2);
     }
 
     #[test]
     fn derive_key_different_salt() {
-        let k1 = derive_key("password", b"salt_aaaaaaaaaa16");
-        let k2 = derive_key("password", b"salt_bbbbbbbbbb16");
+        let k1 = derive_key("password", b"salt_aaaaaaaaaa16", KdfParams::CURRENT);
+        let k2 = derive_key("password", b"salt_bbbbbbbbbb16", KdfParams::CURRENT);
         assert_ne!(*k1, *k2);
+    }
+
+    // -- KdfParams (6 tests) --
+
+    /// Pins the SK2B v1 format. These values are not free to change: the container
+    /// header has no parameter field, so every existing `.sk2backup` and the iOS
+    /// `sk2-core` build assume exactly these. If this test fails, the format changed —
+    /// which requires a BACKUP_VERSION bump, not an edit to this assertion.
+    #[test]
+    #[cfg(any(feature = "export", feature = "import"))]
+    fn sk2b_v1_params_are_pinned() {
+        assert_eq!(KdfParams::SK2B_V1.time_cost(), 4);
+        assert_eq!(KdfParams::SK2B_V1.memory_cost(), 128 * 1024);
+        assert_eq!(KdfParams::SK2B_V1.parallelism(), 4);
+    }
+
+    #[test]
+    fn current_params_match_constants() {
+        assert_eq!(KdfParams::CURRENT.time_cost(), TIME_COST);
+        assert_eq!(KdfParams::CURRENT.memory_cost(), MEMORY_COST);
+        assert_eq!(KdfParams::CURRENT.parallelism(), PARALLELISM);
+    }
+
+    #[test]
+    fn validated_accepts_stored_params() {
+        let p = KdfParams::validated(3, 64 * 1024, 2).unwrap();
+        assert_eq!(
+            (p.time_cost(), p.memory_cost(), p.parallelism()),
+            (3, 64 * 1024, 2)
+        );
+    }
+
+    /// A corrupt or hand-edited metadata row must not reach `derive_key`, where bad
+    /// parameters would panic instead of producing a diagnosable error.
+    #[test]
+    fn validated_rejects_impossible_params() {
+        // time_cost = 0 and parallelism = 0 are both outside what Argon2 accepts.
+        assert!(KdfParams::validated(0, 64 * 1024, 1).is_err());
+        assert!(KdfParams::validated(1, 64 * 1024, 0).is_err());
+        // Memory below 8 KiB per lane is rejected too.
+        assert!(KdfParams::validated(1, 1, 1).is_err());
+    }
+
+    /// F2: the whole point of storing parameters per vault. A key derived under one
+    /// set of parameters must still be reproducible after the build's constants move
+    /// on — otherwise raising MEMORY_COST would brick every existing vault.
+    #[test]
+    fn key_is_reproducible_under_its_own_params() {
+        let salt = b"fixed_salt_16byt";
+        let old = KdfParams::validated(2, 32 * 1024, 1).unwrap();
+
+        let at_creation = derive_key("password", salt, old);
+        // Simulates a later build whose CURRENT has moved on but which loaded `old`
+        // back out of the vault's metadata row.
+        let at_unlock = derive_key("password", salt, old);
+        assert_eq!(*at_creation, *at_unlock);
+
+        // And the same password under this build's parameters is a *different* key —
+        // which is exactly why unlock must use the stored ones.
+        let under_current = derive_key("password", salt, KdfParams::CURRENT);
+        assert_ne!(*at_creation, *under_current);
+    }
+
+    #[test]
+    fn different_params_give_different_keys() {
+        let salt = b"fixed_salt_16byt";
+        let a = derive_key(
+            "password",
+            salt,
+            KdfParams::validated(2, 32 * 1024, 1).unwrap(),
+        );
+        let b = derive_key(
+            "password",
+            salt,
+            KdfParams::validated(3, 32 * 1024, 1).unwrap(),
+        );
+        assert_ne!(*a, *b);
     }
 
     // -- encrypt_raw / decrypt_raw (4 tests) --

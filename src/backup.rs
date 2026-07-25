@@ -102,7 +102,9 @@ pub(crate) fn export_vault(
 
     let mut salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt);
-    let backup_key = crypto::derive_key(backup_passphrase, &salt);
+    // SK2B_V1, never the vault's parameters: the header has no field to record them,
+    // so the format fixes them and iOS assumes the same. See crypto::KdfParams.
+    let backup_key = crypto::derive_key(backup_passphrase, &salt, crypto::KdfParams::SK2B_V1);
 
     let (nonce, ciphertext) = crypto::encrypt_raw(&backup_key, csv.as_bytes());
 
@@ -146,7 +148,9 @@ pub(crate) fn import_vault(
     let nonce = &encrypted_blob[21..45];
     let ciphertext = &encrypted_blob[45..];
 
-    let backup_key = crypto::derive_key(backup_passphrase, salt);
+    // Must match export_vault: the version byte checked above is what guarantees these
+    // are the right parameters for this blob.
+    let backup_key = crypto::derive_key(backup_passphrase, salt, crypto::KdfParams::SK2B_V1);
 
     let plaintext_bytes = crypto::decrypt_raw(&backup_key, nonce, ciphertext)
         .map_err(|()| "Backup decryption failed — wrong passphrase or corrupt file.".to_string())?;
@@ -430,7 +434,7 @@ mod tests {
 
         let mut salt = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut salt);
-        let backup_key = crypto::derive_key("bp", &salt);
+        let backup_key = crypto::derive_key("bp", &salt, crypto::KdfParams::SK2B_V1);
         let (nonce, ciphertext) = crypto::encrypt_raw(&backup_key, csv.as_bytes());
 
         let mut blob = Vec::with_capacity(HEADER_LEN + ciphertext.len());
@@ -465,7 +469,7 @@ mod tests {
 
         let mut salt = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut salt);
-        let backup_key = crypto::derive_key("bp", &salt);
+        let backup_key = crypto::derive_key("bp", &salt, crypto::KdfParams::SK2B_V1);
         let (nonce, ciphertext) = crypto::encrypt_raw(&backup_key, csv.as_bytes());
 
         let mut blob = Vec::with_capacity(HEADER_LEN + ciphertext.len());

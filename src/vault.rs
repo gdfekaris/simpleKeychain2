@@ -73,9 +73,12 @@ pub(crate) fn init_vault(conn: &Connection) -> Result<(), String> {
     let mut salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt);
 
-    let key = crypto::derive_key(&password, &salt);
+    // New vault: this build's parameters, recorded alongside the salt so a future
+    // build that raises them can still unlock this vault.
+    let params = crypto::KdfParams::CURRENT;
+    let key = crypto::derive_key(&password, &salt, params);
     let (verify_nonce, verify_ciphertext) = crypto::encrypt_raw(&key, VERIFY_PLAINTEXT);
-    db::store_metadata(conn, &salt, &verify_nonce, &verify_ciphertext);
+    db::store_metadata(conn, &salt, params, &verify_nonce, &verify_ciphertext);
 
     ui::success("Vault initialized.");
     Ok(())
@@ -85,7 +88,8 @@ pub(crate) fn unlock_vault(conn: &Connection) -> Result<Zeroizing<[u8; KEY_LEN]>
     require_vault(conn)?;
     let master_password = read_master_password()?;
     let salt = db::load_salt(conn);
-    let key = crypto::derive_key(&master_password, &salt);
+    // This vault's own parameters, not this build's — see db::load_params.
+    let key = crypto::derive_key(&master_password, &salt, db::load_params(conn)?);
 
     let (nonce, ciphertext) = db::load_verify_token(conn);
     if !crypto::verify_key(&key, &nonce, &ciphertext) {
@@ -100,7 +104,7 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
 
     let old_password = read_master_password()?;
     let salt = db::load_salt(conn);
-    let old_key = crypto::derive_key(&old_password, &salt);
+    let old_key = crypto::derive_key(&old_password, &salt, db::load_params(conn)?);
     let (nonce, ciphertext) = db::load_verify_token(conn);
     if !crypto::verify_key(&old_key, &nonce, &ciphertext) {
         return Err("Wrong master password.".into());
@@ -122,7 +126,10 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
 
     let mut new_salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut new_salt);
-    let new_key = crypto::derive_key(&new_password, &new_salt);
+    // change-password is the migration path: the vault is re-keyed under this build's
+    // parameters, so a vault created before a cost increase picks it up here.
+    let new_params = crypto::KdfParams::CURRENT;
+    let new_key = crypto::derive_key(&new_password, &new_salt, new_params);
 
     let tx = conn
         .unchecked_transaction()
@@ -159,7 +166,7 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     let (verify_nonce, verify_ciphertext) = crypto::encrypt_raw(&new_key, VERIFY_PLAINTEXT);
     tx.execute(
         "UPDATE metadata SET salt = ?1, time_cost = ?2, memory_cost = ?3, parallelism = ?4, verify_nonce = ?5, verify_ciphertext = ?6 WHERE id = 1",
-        rusqlite::params![new_salt.as_slice(), TIME_COST, MEMORY_COST, PARALLELISM, verify_nonce, verify_ciphertext],
+        rusqlite::params![new_salt.as_slice(), new_params.time_cost(), new_params.memory_cost(), new_params.parallelism(), verify_nonce, verify_ciphertext],
     )
     .expect("Failed to update metadata");
 

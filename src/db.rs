@@ -42,15 +42,41 @@ pub(crate) fn is_first_run(conn: &Connection) -> bool {
 pub(crate) fn store_metadata(
     conn: &Connection,
     salt: &[u8],
+    params: crypto::KdfParams,
     verify_nonce: &[u8],
     verify_ciphertext: &[u8],
 ) {
     conn.execute(
         "INSERT INTO metadata (id, salt, time_cost, memory_cost, parallelism, verify_nonce, verify_ciphertext)
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![salt, TIME_COST, MEMORY_COST, PARALLELISM, verify_nonce, verify_ciphertext],
+        rusqlite::params![
+            salt,
+            params.time_cost(),
+            params.memory_cost(),
+            params.parallelism(),
+            verify_nonce,
+            verify_ciphertext
+        ],
     )
     .expect("Failed to store metadata");
+}
+
+/// The Argon2 parameters this vault's key was derived with.
+///
+/// These columns were written from the day the schema existed but never read back —
+/// `derive_key` always used the compile-time constants, so raising a constant would
+/// have locked every existing vault out with nothing but "Wrong master password."
+/// Reading them is what makes the constants safe to change.
+pub(crate) fn load_params(conn: &Connection) -> Result<crypto::KdfParams, String> {
+    let (time_cost, memory_cost, parallelism): (u32, u32, u32) = conn
+        .query_row(
+            "SELECT time_cost, memory_cost, parallelism FROM metadata WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("Failed to load Argon2 parameters");
+
+    crypto::KdfParams::validated(time_cost, memory_cost, parallelism)
 }
 
 pub(crate) fn load_salt(conn: &Connection) -> Vec<u8> {
@@ -315,7 +341,13 @@ mod tests {
     #[test]
     fn is_first_run_after_metadata() {
         let conn = setup();
-        store_metadata(&conn, &[0u8; 16], &[0u8; 24], &[0u8; 32]);
+        store_metadata(
+            &conn,
+            &[0u8; 16],
+            crypto::KdfParams::CURRENT,
+            &[0u8; 24],
+            &[0u8; 32],
+        );
         assert!(!is_first_run(&conn));
     }
 
@@ -323,7 +355,13 @@ mod tests {
     fn salt_roundtrip() {
         let conn = setup();
         let salt = vec![0xaa; 16];
-        store_metadata(&conn, &salt, &[0u8; 24], &[0u8; 32]);
+        store_metadata(
+            &conn,
+            &salt,
+            crypto::KdfParams::CURRENT,
+            &[0u8; 24],
+            &[0u8; 32],
+        );
         assert_eq!(load_salt(&conn), salt);
     }
 
@@ -332,10 +370,100 @@ mod tests {
         let conn = setup();
         let nonce = vec![0xbb; 24];
         let ct = vec![0xcc; 32];
-        store_metadata(&conn, &[0u8; 16], &nonce, &ct);
+        store_metadata(&conn, &[0u8; 16], crypto::KdfParams::CURRENT, &nonce, &ct);
         let (n, c) = load_verify_token(&conn);
         assert_eq!(n, nonce);
         assert_eq!(c, ct);
+    }
+
+    #[test]
+    fn params_roundtrip() {
+        let conn = setup();
+        store_metadata(
+            &conn,
+            &[0u8; 16],
+            crypto::KdfParams::CURRENT,
+            &[0u8; 24],
+            &[0u8; 32],
+        );
+        assert_eq!(load_params(&conn).unwrap(), crypto::KdfParams::CURRENT);
+    }
+
+    /// F2: a vault written under parameters that differ from this build's constants
+    /// must read back its *own* parameters, not the constants. Before the fix these
+    /// columns were written and never read, so such a vault could not be unlocked.
+    #[test]
+    fn params_roundtrip_when_they_differ_from_current() {
+        let conn = setup();
+        let old = crypto::KdfParams::validated(2, 32 * 1024, 1).unwrap();
+        assert_ne!(
+            old,
+            crypto::KdfParams::CURRENT,
+            "test needs distinct values"
+        );
+
+        store_metadata(&conn, &[0u8; 16], old, &[0u8; 24], &[0u8; 32]);
+        assert_eq!(load_params(&conn).unwrap(), old);
+    }
+
+    /// F2, end to end at the storage layer: this is exactly the sequence
+    /// `vault::unlock_vault` runs, minus the TTY prompt. A vault created by a build
+    /// whose constants differ from this one's must still verify its master password —
+    /// and the second half asserts that the pre-fix code path would *not* have.
+    #[test]
+    fn vault_created_under_older_params_still_unlocks() {
+        let conn = setup();
+        let old = crypto::KdfParams::validated(2, 32 * 1024, 1).unwrap();
+        assert_ne!(
+            old,
+            crypto::KdfParams::CURRENT,
+            "test needs distinct values"
+        );
+
+        // As an older build created it: key derived under `old`, params recorded.
+        let salt = [0x11u8; 16];
+        let key_at_creation = crypto::derive_key("correct horse", &salt, old);
+        let (n, c) = crypto::encrypt_raw(&key_at_creation, VERIFY_PLAINTEXT);
+        store_metadata(&conn, &salt, old, &n, &c);
+
+        // As this build unlocks it: parameters come from the vault, not the constants.
+        let params = load_params(&conn).unwrap();
+        let key = crypto::derive_key("correct horse", &load_salt(&conn), params);
+        let (nonce, ct) = load_verify_token(&conn);
+        assert!(
+            crypto::verify_key(&key, &nonce, &ct),
+            "vault created under older parameters must still unlock"
+        );
+
+        // What the code did before F2 was fixed: always derive with the constants.
+        let pre_fix = crypto::derive_key(
+            "correct horse",
+            &load_salt(&conn),
+            crypto::KdfParams::CURRENT,
+        );
+        assert!(
+            !crypto::verify_key(&pre_fix, &nonce, &ct),
+            "deriving with the build's constants is what produced the bogus \
+             'Wrong master password.' — if this passes, the test proves nothing"
+        );
+    }
+
+    /// A tampered or corrupt metadata row yields an error, not a panic in derive_key.
+    #[test]
+    fn load_params_rejects_corrupt_row() {
+        let conn = setup();
+        store_metadata(
+            &conn,
+            &[0u8; 16],
+            crypto::KdfParams::CURRENT,
+            &[0u8; 24],
+            &[0u8; 32],
+        );
+        conn.execute("UPDATE metadata SET memory_cost = 0 WHERE id = 1", [])
+            .unwrap();
+
+        let err = load_params(&conn).unwrap_err();
+        assert!(err.contains("Argon2 parameters"), "got: {err}");
     }
 
     // -- credential CRUD (9 tests) --
