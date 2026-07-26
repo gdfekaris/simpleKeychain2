@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-## Version 1.1.0
+## Version 1.2.0
 
 A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
 
@@ -422,13 +422,17 @@ cargo build --release --no-default-features                     # neither export
 
 ## Security
 
+For the threat model — what sk2 is and is not designed to protect against — plus known limitations
+and how to report a vulnerability, see **[SECURITY.md](SECURITY.md)**. Release-by-release changes are
+in **[CHANGELOG.md](CHANGELOG.md)**.
+
 - **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
 - **Key-derivation parameters** — Each vault records the Argon2id parameters it was created with, and is always unlocked using its own recorded values. A future release can raise the cost without locking existing vaults out; run `sk2 change-password` to re-key an existing vault under the newer, stronger parameters. Backups are separate: the `.sk2backup` format fixes its parameters as part of the container, so backups stay readable by any version of sk2 and by the iOS app.
-- **Memory** — Secrets (master password, derived key, decrypted passwords) are zeroed in memory when no longer needed, including on error paths (e.g. wrong password, empty input).
+- **Memory** — Secrets (master password, derived key, decrypted passwords) are held in `Zeroizing` wrappers and wiped when they go out of scope, including on error paths (e.g. wrong password, empty input) and on panics, since those unwind. This is best-effort rather than a guarantee: some intermediate buffers — notably the JSON serialization inside encrypt/decrypt — are ordinary allocations that are not wiped, so a memory dump or swap file could still contain plaintext. See `SECURITY.md`.
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
 - **File permissions** — On Linux/macOS, sk2 applies a process-wide `umask` of `0077` before touching the filesystem, so everything it creates is owner-only from the moment it exists. `~/.sk2/` is created directly at `0700`, `vault.db` inherits `0600`, and backup files are opened with an explicit `0600` mode. Permissions are established at creation time rather than tightened afterward, which removes the window in which a newly created file would be briefly readable by others. On Windows, files inherit default ACLs — there is no equivalent hardening.
 - **Vault location** — By default, the vault is stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). Override with `--vault` or the `SK2_VAULT` environment variable (flag takes precedence). Parent directories are created automatically.
-- **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
+- **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, or choose a backup passphrase during `export`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
 - **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts. If a credential fails: restore it from a backup with `sk2 import`, or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
 
 ## Testing
