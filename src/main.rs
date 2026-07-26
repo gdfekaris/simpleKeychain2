@@ -30,6 +30,11 @@ use zeroize::Zeroizing;
 
 use constants::*;
 
+/// Default generated-password length. Shared by `add --generate`, the standalone
+/// `generate` command, and `check_generate_flags`, so the three cannot disagree
+/// about what "the user did not pass --length" looks like.
+const DEFAULT_PASSWORD_LENGTH: usize = 16;
+
 fn ensure_dir(path: &std::path::Path) {
     #[cfg(unix)]
     {
@@ -94,7 +99,7 @@ enum Command {
         #[arg(short, long)]
         generate: bool,
         /// Length of the generated password (default: 16, range: 4–64)
-        #[arg(short, long, default_value_t = 16)]
+        #[arg(short, long, default_value_t = DEFAULT_PASSWORD_LENGTH)]
         length: usize,
         /// Character set to use when generating a password (requires --generate)
         #[arg(short, long, default_value = "default")]
@@ -157,7 +162,7 @@ enum Command {
     /// Generate a random password without storing it
     Generate {
         /// Length of the generated password (default: 16, range: 4–64)
-        #[arg(short, long, default_value_t = 16)]
+        #[arg(short, long, default_value_t = DEFAULT_PASSWORD_LENGTH)]
         length: usize,
         /// Character set to use when generating a password
         #[arg(short, long, default_value = "default")]
@@ -189,6 +194,7 @@ enum Command {
 }
 
 #[cfg(feature = "export")]
+#[cfg_attr(test, derive(Debug))]
 #[derive(Copy, Clone, clap::ValueEnum)]
 enum ExportFormat {
     /// SK2B: Argon2id + XChaCha20-Poly1305 (recommended, iOS-compatible)
@@ -265,6 +271,28 @@ fn resolve_service(conn: &Connection, query: &str) -> Result<String, String> {
 }
 
 // --- Generate (no vault) ---
+
+/// Reject `--length` / `--charset` supplied without `--generate`.
+///
+/// Called before `unlock_vault`, which derives an Argon2 key at 128 MiB and then
+/// prompts for a username. Running it afterwards meant the user typed a master
+/// password and a username before being told the flag combination was invalid.
+fn check_generate_flags(
+    generate: bool,
+    length: usize,
+    charset: &crypto::Charset,
+) -> Result<(), String> {
+    if generate {
+        return Ok(());
+    }
+    if length != DEFAULT_PASSWORD_LENGTH {
+        return Err("--length requires --generate.".into());
+    }
+    if !matches!(charset, crypto::Charset::Default) {
+        return Err("--charset requires --generate.".into());
+    }
+    Ok(())
+}
 
 fn validated_generate(
     length: usize,
@@ -350,18 +378,16 @@ fn run(cli: Cli) -> Result<(), String> {
             notes,
             url,
         } => {
+            // Before unlock_vault: a bad flag combination should not cost the user a
+            // master password entry and a username prompt first (F7b).
+            check_generate_flags(generate, length, &charset)?;
+
             let key = vault::unlock_vault(&conn)?;
             let username = vault::prompt("Username: ");
 
             let password = if generate {
                 validated_generate(length, &charset)?
             } else {
-                if length != 16 {
-                    return Err("--length requires --generate.".into());
-                }
-                if !matches!(charset, crypto::Charset::Default) {
-                    return Err("--charset requires --generate.".into());
-                }
                 ui::service_password_prompt("Password: ");
                 let p =
                     Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
@@ -738,5 +764,98 @@ fn main() -> process::ExitCode {
             ui::error(&msg);
             process::ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- check_generate_flags (F7b) --
+
+    /// The point of the fix: these must be rejected without the caller having
+    /// reached `unlock_vault`, so the user is not asked for a master password and a
+    /// username before being told the flags are wrong.
+    #[test]
+    fn length_without_generate_is_rejected() {
+        let err = check_generate_flags(false, 20, &crypto::Charset::Default).unwrap_err();
+        assert_eq!(err, "--length requires --generate.");
+    }
+
+    #[test]
+    fn charset_without_generate_is_rejected() {
+        let err = check_generate_flags(false, DEFAULT_PASSWORD_LENGTH, &crypto::Charset::Hex)
+            .unwrap_err();
+        assert_eq!(err, "--charset requires --generate.");
+    }
+
+    #[test]
+    fn defaults_without_generate_are_fine() {
+        assert!(
+            check_generate_flags(false, DEFAULT_PASSWORD_LENGTH, &crypto::Charset::Default).is_ok()
+        );
+    }
+
+    #[test]
+    fn anything_goes_with_generate() {
+        assert!(check_generate_flags(true, 64, &crypto::Charset::Dna).is_ok());
+        assert!(
+            check_generate_flags(true, DEFAULT_PASSWORD_LENGTH, &crypto::Charset::Default).is_ok()
+        );
+    }
+
+    // -- resolve_export_format / default_output_for (F7d) --
+
+    #[cfg(feature = "export")]
+    #[test]
+    fn explicit_format_flag_wins_over_the_extension() {
+        let f = resolve_export_format(Some(ExportFormat::Gpg), Some("backup.sk2backup")).unwrap();
+        assert!(matches!(f, ExportFormat::Gpg));
+    }
+
+    #[cfg(feature = "export")]
+    #[test]
+    fn format_defaults_to_sk2b_with_no_output() {
+        assert!(matches!(
+            resolve_export_format(None, None).unwrap(),
+            ExportFormat::Sk2b
+        ));
+    }
+
+    #[cfg(feature = "export")]
+    #[test]
+    fn format_is_inferred_from_the_extension() {
+        assert!(matches!(
+            resolve_export_format(None, Some("v.sk2backup")).unwrap(),
+            ExportFormat::Sk2b
+        ));
+        assert!(matches!(
+            resolve_export_format(None, Some("v.csv.gpg")).unwrap(),
+            ExportFormat::Gpg
+        ));
+        // Case-insensitive, per the to_ascii_lowercase in the implementation.
+        assert!(matches!(
+            resolve_export_format(None, Some("V.SK2BACKUP")).unwrap(),
+            ExportFormat::Sk2b
+        ));
+    }
+
+    /// An unrecognized extension is an error rather than a guess — picking the wrong
+    /// format silently would write a backup the user cannot restore from.
+    #[cfg(feature = "export")]
+    #[test]
+    fn unknown_extension_is_an_error_not_a_guess() {
+        let err = resolve_export_format(None, Some("backup.txt")).unwrap_err();
+        assert!(err.contains("Cannot infer backup format"), "got: {err}");
+    }
+
+    #[cfg(feature = "export")]
+    #[test]
+    fn default_output_names_match_the_documented_ones() {
+        assert_eq!(
+            default_output_for(ExportFormat::Sk2b),
+            "sk2-export.sk2backup"
+        );
+        assert_eq!(default_output_for(ExportFormat::Gpg), "sk2-export.csv.gpg");
     }
 }

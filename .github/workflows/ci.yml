@@ -47,6 +47,36 @@ jobs:
       - name: Test (no default features)
         run: cargo test --no-default-features
 
+  msrv:
+    name: Minimum supported Rust version
+    # `check` uses @stable, which only ever proves the newest compiler works. The
+    # README's build instructions promise a floor, and nothing was testing it --
+    # that is how the claim drifted to 1.85 while the code needed 1.88.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Read the floor from Cargo.toml rather than repeating it here: a hardcoded
+      # version would be one more fact stored twice, free to drift.
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        run: echo "version=$(grep '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Building is the claim under test -- from source is currently the only
+      # install path sk2 documents.
+      - name: Build (default features)
+        run: cargo build
+
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+
   audit:
     name: Security advisories
     # Single runner: the dependency tree is platform-independent, so the OS
