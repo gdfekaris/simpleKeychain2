@@ -37,8 +37,7 @@ fn open_output(path: &str, overwrite: bool) -> Result<File, String> {
 
 fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
     ui::password_prompt("Backup passphrase: ");
-    let p1 =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let p1 = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
     if p1.is_empty() {
         return Err("Backup passphrase cannot be empty.".into());
     }
@@ -48,8 +47,7 @@ fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
     // users are most likely to treat as throwaway.
     ui::password_strength(crypto::password_entropy(&p1));
     ui::password_prompt("Confirm backup passphrase: ");
-    let p2 =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let p2 = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
     if *p1 != *p2 {
         return Err("Backup passphrases do not match.".into());
     }

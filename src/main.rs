@@ -363,9 +363,8 @@ fn run(cli: Cli) -> Result<(), String> {
                     return Err("--charset requires --generate.".into());
                 }
                 ui::service_password_prompt("Password: ");
-                let p = Zeroizing::new(
-                    rpassword::read_password_from_tty(None).expect("Failed to read password"),
-                );
+                let p =
+                    Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
                 if p.is_empty() {
                     return Err("Password cannot be empty.".into());
                 }
@@ -573,9 +572,8 @@ fn run(cli: Cli) -> Result<(), String> {
             let mut password_was_changed = false;
             let new_password: Zeroizing<String> = if prompt_password {
                 ui::service_password_prompt("New password (leave blank to keep current): ");
-                let input = Zeroizing::new(
-                    rpassword::read_password_from_tty(None).expect("Failed to read password"),
-                );
+                let input =
+                    Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
                 if input.is_empty() {
                     current_password
                 } else {

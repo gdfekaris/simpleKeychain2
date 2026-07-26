@@ -13,7 +13,7 @@ A lightweight, local-only CLI password manager. No servers, no sync, no network.
 
 ## Installation
 
-Requires [Rust](https://www.rust-lang.org/tools/install) (1.85+).
+Requires [Rust](https://www.rust-lang.org/tools/install) 1.88 or newer.
 
 ```bash
 git clone https://github.com/gdfekaris/simpleKeychain2.git

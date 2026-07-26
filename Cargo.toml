@@ -2,6 +2,10 @@
 name = "simpleKeychain2"
 version = "1.1.0"
 edition = "2024"
+# Edition 2024 needs 1.85, but `vault_path` uses a let-chain (main.rs), stabilized
+# in 1.88. Declared so cargo reports "requires rustc 1.88" instead of leaving users
+# with a bare E0658 about unstable `let` expressions.
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/gdfekaris/simpleKeychain2"
 
@@ -18,8 +22,8 @@ chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 rand = "0.8"
-rpassword = "5"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rpassword = "7"
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zeroize = { version = "1.8", features = ["alloc"] }

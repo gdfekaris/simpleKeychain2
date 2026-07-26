@@ -70,8 +70,7 @@ fn parse_gpg_csv(csv: &str) -> Result<(Vec<Vec<String>>, usize), String> {
 
 fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
     ui::password_prompt("Backup passphrase: ");
-    let p =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let p = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
     if p.is_empty() {
         return Err("Backup passphrase cannot be empty.".into());
     }

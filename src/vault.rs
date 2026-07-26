@@ -39,8 +39,7 @@ fn require_vault(conn: &Connection) -> Result<(), String> {
 
 fn read_master_password() -> Result<Zeroizing<String>, String> {
     ui::password_prompt("Master password: ");
-    let password =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let password = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
 
     if password.is_empty() {
         return Err("Password cannot be empty.".into());
@@ -55,16 +54,14 @@ pub(crate) fn init_vault(conn: &Connection) -> Result<(), String> {
     }
 
     ui::password_prompt("Set master password: ");
-    let password =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let password = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
 
     if password.is_empty() {
         return Err("Password cannot be empty.".into());
     }
 
     ui::password_prompt("Confirm master password: ");
-    let confirm =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let confirm = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
 
     if password != confirm {
         return Err("Passwords do not match.".into());
@@ -111,15 +108,13 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     }
 
     ui::password_prompt("New master password: ");
-    let new_password =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let new_password = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
     if new_password.is_empty() {
         return Err("Password cannot be empty.".into());
     }
     ui::password_strength(crypto::password_entropy(&new_password));
     ui::password_prompt("Confirm new master password: ");
-    let confirm =
-        Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
+    let confirm = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));
     if new_password != confirm {
         return Err("Passwords do not match.".into());
     }
