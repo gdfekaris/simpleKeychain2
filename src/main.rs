@@ -273,13 +273,8 @@ fn validated_generate(
     if !(4..=64).contains(&length) {
         return Err("Password length must be between 4 and 64.".into());
     }
-    let alphabet_size = match charset {
-        crypto::Charset::Default => 74.0_f64,
-        crypto::Charset::Alphanumeric => 62.0,
-        crypto::Charset::Websafe => 66.0,
-        crypto::Charset::Hex => 16.0,
-        crypto::Charset::Dna => 4.0,
-    };
+    // Derived from the charset itself, never restated here — see crypto::charset_bytes.
+    let alphabet_size = crypto::charset_bytes(charset).len() as f64;
     let entropy_bits = length as f64 * alphabet_size.log2();
     if entropy_bits < 64.0 {
         ui::warning(&format!(
@@ -402,7 +397,7 @@ fn run(cli: Cli) -> Result<(), String> {
         } => {
             let key = vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
-            match db::get_credential(&conn, &key, &service) {
+            match db::get_credential(&conn, &key, &service)? {
                 Some((username, password, notes, url, updated_at)) => {
                     let password = Zeroizing::new(password);
                     let clipboard_text: &str = if copy_username { &username } else { &password };
@@ -556,7 +551,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let service = resolve_service(&conn, &service)?;
 
             let (current_username, current_password, current_notes, current_url, _) =
-                db::get_credential(&conn, &key, &service)
+                db::get_credential(&conn, &key, &service)?
                     .ok_or_else(|| format!("No credential found for '{service}'."))?;
             let current_password = Zeroizing::new(current_password);
 

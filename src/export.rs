@@ -6,13 +6,10 @@ use zeroize::Zeroizing;
 
 use crate::backup;
 use crate::constants::*;
+use crate::crypto;
 use crate::db;
 use crate::ui;
 use crate::vault;
-
-fn csv_escape(field: &str) -> String {
-    format!("\"{}\"", field.replace('"', "\"\""))
-}
 
 fn open_output(path: &str, overwrite: bool) -> Result<File, String> {
     if overwrite {
@@ -45,6 +42,11 @@ fn read_backup_passphrase() -> Result<Zeroizing<String>, String> {
     if p1.is_empty() {
         return Err("Backup passphrase cannot be empty.".into());
     }
+    // Shown before the confirmation prompt so a weak choice can still be abandoned.
+    // This passphrase guards every credential at once, in a file designed to leave
+    // the machine — the widest blast radius of any secret sk2 handles, and the one
+    // users are most likely to treat as throwaway.
+    ui::password_strength(crypto::password_entropy(&p1));
     ui::password_prompt("Confirm backup passphrase: ");
     let p2 =
         Zeroizing::new(rpassword::read_password_from_tty(None).expect("Failed to read password"));
@@ -140,23 +142,28 @@ pub(crate) fn export_gpg(
     let mut csv = Zeroizing::new(String::from("name,username,password,notes,url\n"));
     for service in &services {
         match db::get_credential(conn, key, service) {
-            Some((username, password, notes, url, _)) => {
+            Ok(Some((username, password, notes, url, _))) => {
                 let password = Zeroizing::new(password);
-                csv.push_str(&csv_escape(service));
+                csv.push_str(&backup::csv_escape(service));
                 csv.push(',');
-                csv.push_str(&csv_escape(&username));
+                csv.push_str(&backup::csv_escape(&username));
                 csv.push(',');
-                csv.push_str(&csv_escape(&password));
+                csv.push_str(&backup::csv_escape(&password));
                 csv.push(',');
-                csv.push_str(&csv_escape(&notes));
+                csv.push_str(&backup::csv_escape(&notes));
                 csv.push(',');
-                csv.push_str(&csv_escape(&url));
+                csv.push_str(&backup::csv_escape(&url));
                 csv.push('\n');
             }
-            None => {
-                ui::warning(&format!(
-                    "Could not decrypt credential for '{service}', skipping."
-                ));
+            Ok(None) => {
+                // Raced with a delete between list_services and now.
+                ui::warning(&format!("Credential for '{service}' vanished, skipping."));
+            }
+            Err(e) => {
+                // Corrupt row. Skip it rather than aborting the export -- a partial
+                // backup of the readable entries is more useful than none, and the
+                // message says exactly which entry was lost.
+                ui::warning(&format!("{e} Skipping it in this export."));
             }
         }
     }
@@ -225,27 +232,27 @@ mod tests {
 
     #[test]
     fn escape_plain_text() {
-        assert_eq!(csv_escape("hello"), "\"hello\"");
+        assert_eq!(backup::csv_escape("hello"), "\"hello\"");
     }
 
     #[test]
     fn escape_quotes() {
-        assert_eq!(csv_escape("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(backup::csv_escape("say \"hi\""), "\"say \"\"hi\"\"\"");
     }
 
     #[test]
     fn escape_commas() {
-        assert_eq!(csv_escape("a,b"), "\"a,b\"");
+        assert_eq!(backup::csv_escape("a,b"), "\"a,b\"");
     }
 
     #[test]
     fn escape_empty() {
-        assert_eq!(csv_escape(""), "\"\"");
+        assert_eq!(backup::csv_escape(""), "\"\"");
     }
 
     #[test]
     fn escape_newlines() {
-        assert_eq!(csv_escape("line1\nline2"), "\"line1\nline2\"");
+        assert_eq!(backup::csv_escape("line1\nline2"), "\"line1\nline2\"");
     }
 
     /// F1 regression, end to end across the module boundary: what `export_gpg` writes
@@ -266,7 +273,7 @@ mod tests {
 
         let mut csv = String::from("name,username,password,notes,url\n");
         for field in fields {
-            csv.push_str(&csv_escape(field));
+            csv.push_str(&backup::csv_escape(field));
             csv.push(',');
         }
         csv.pop();

@@ -150,9 +150,11 @@ pub(crate) fn change_password(conn: &Connection) -> Result<(), String> {
     drop(stmt);
 
     for (service, nonce, ciphertext, updated_at) in &rows {
+        // `?` here drops `tx` without committing, so the rollback leaves the vault
+        // intact under the old password — the behavior the README already promises.
         let (username, password, notes, url) =
             crypto::decrypt(&old_key, service, nonce, ciphertext)
-                .expect("Data corruption — failed to decrypt credential during password change");
+                .map_err(|()| db::decrypt_failure(service))?;
         let (new_nonce, new_ciphertext) =
             crypto::encrypt(&new_key, service, &username, &password, &notes, &url);
         tx.execute(

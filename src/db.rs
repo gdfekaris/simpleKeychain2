@@ -136,11 +136,28 @@ pub(crate) fn upsert_credential_tx(
     Ok(())
 }
 
+/// Shared message for a row that will not decrypt under the current key.
+///
+/// A corrupt row used to `.expect()`, so the natural follow-up to a failed
+/// `sk2 verify` — `get`, `edit`, `rename`, `export`, `change-password` — met a raw
+/// Rust panic. Secrets were never leaked (panics unwind, so `Zeroizing` destructors
+/// run), but a corrupt vault is exactly when a clear message matters most. This
+/// mirrors the recovery advice `Command::Verify` already prints.
+pub(crate) fn decrypt_failure(service: &str) -> String {
+    format!(
+        "Failed to decrypt the credential for '{service}' — the vault may be corrupt. \
+         Run 'sk2 verify' to check every entry, then either restore from a backup with \
+         'sk2 import <backup>' or drop this entry with 'sk2 delete {service}' and reset \
+         the password on the affected site."
+    )
+}
+
+#[allow(clippy::type_complexity)]
 pub(crate) fn get_credential(
     conn: &Connection,
     key: &[u8; KEY_LEN],
     service: &str,
-) -> Option<(String, String, String, String, Option<i64>)> {
+) -> Result<Option<(String, String, String, String, Option<i64>)>, String> {
     let result = conn.query_row(
         "SELECT nonce, ciphertext, updated_at FROM credentials WHERE service = ?1",
         rusqlite::params![service],
@@ -156,10 +173,10 @@ pub(crate) fn get_credential(
         Ok((nonce, ciphertext, updated_at)) => {
             let (username, password, notes, url) =
                 crypto::decrypt(key, service, &nonce, &ciphertext)
-                    .expect("Data corruption — failed to decrypt credential");
-            Some((username, password, notes, url, updated_at))
+                    .map_err(|()| decrypt_failure(service))?;
+            Ok(Some((username, password, notes, url, updated_at)))
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => panic!("Database error: {e}"),
     }
 }
@@ -238,7 +255,7 @@ pub(crate) fn rename_credential(
     };
 
     let (username, password, notes, url) = crypto::decrypt(key, old_service, &nonce, &ciphertext)
-        .expect("Data corruption — failed to decrypt credential");
+        .map_err(|()| decrypt_failure(old_service))?;
 
     let (new_nonce, new_ciphertext) =
         crypto::encrypt(key, new_service, &username, &password, &notes, &url);
@@ -480,7 +497,7 @@ mod tests {
             "notes",
             "https://github.com",
         );
-        let (u, p, n, url, ts) = get_credential(&conn, &TEST_KEY, "github").unwrap();
+        let (u, p, n, url, ts) = get_credential(&conn, &TEST_KEY, "github").unwrap().unwrap();
         assert_eq!(u, "user");
         assert_eq!(p, "pass123");
         assert_eq!(n, "notes");
@@ -491,7 +508,11 @@ mod tests {
     #[test]
     fn get_missing_returns_none() {
         let conn = setup();
-        assert!(get_credential(&conn, &TEST_KEY, "nonexistent").is_none());
+        assert!(
+            get_credential(&conn, &TEST_KEY, "nonexistent")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -499,7 +520,7 @@ mod tests {
         let conn = setup();
         add_credential(&conn, &TEST_KEY, "svc", "old_user", "old_pass", "", "");
         add_credential(&conn, &TEST_KEY, "svc", "new_user", "new_pass", "", "");
-        let (u, p, _, _, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap();
+        let (u, p, _, _, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap().unwrap();
         assert_eq!(u, "new_user");
         assert_eq!(p, "new_pass");
     }
@@ -509,7 +530,7 @@ mod tests {
         let conn = setup();
         add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
         assert!(delete_credential(&conn, "svc"));
-        assert!(get_credential(&conn, &TEST_KEY, "svc").is_none());
+        assert!(get_credential(&conn, &TEST_KEY, "svc").unwrap().is_none());
     }
 
     #[test]
@@ -525,7 +546,7 @@ mod tests {
         assert!(update_credential(
             &conn, &TEST_KEY, "svc", "u2", "p2", "notes", "url", true
         ));
-        let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap();
+        let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap().unwrap();
         assert_eq!(u, "u2");
         assert_eq!(p, "p2");
         assert_eq!(n, "notes");
@@ -544,9 +565,9 @@ mod tests {
     fn update_preserves_timestamp() {
         let conn = setup();
         add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
-        let ts1 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4;
+        let ts1 = get_credential(&conn, &TEST_KEY, "svc").unwrap().unwrap().4;
         update_credential(&conn, &TEST_KEY, "svc", "u2", "p2", "", "", false);
-        let ts2 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4;
+        let ts2 = get_credential(&conn, &TEST_KEY, "svc").unwrap().unwrap().4;
         assert_eq!(ts1, ts2);
     }
 
@@ -558,10 +579,18 @@ mod tests {
             "INSERT INTO credentials (service, nonce, ciphertext, updated_at) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params!["svc", nonce, ct, 1000],
         ).unwrap();
-        let ts1 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4.unwrap();
+        let ts1 = get_credential(&conn, &TEST_KEY, "svc")
+            .unwrap()
+            .unwrap()
+            .4
+            .unwrap();
         assert_eq!(ts1, 1000);
         update_credential(&conn, &TEST_KEY, "svc", "u2", "p2", "", "", true);
-        let ts2 = get_credential(&conn, &TEST_KEY, "svc").unwrap().4.unwrap();
+        let ts2 = get_credential(&conn, &TEST_KEY, "svc")
+            .unwrap()
+            .unwrap()
+            .4
+            .unwrap();
         assert!(ts2 > ts1);
     }
 
@@ -572,8 +601,8 @@ mod tests {
         let conn = setup();
         add_credential(&conn, &TEST_KEY, "old", "u", "p", "n", "url");
         rename_credential(&conn, &TEST_KEY, "old", "new").unwrap();
-        assert!(get_credential(&conn, &TEST_KEY, "old").is_none());
-        let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "new").unwrap();
+        assert!(get_credential(&conn, &TEST_KEY, "old").unwrap().is_none());
+        let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "new").unwrap().unwrap();
         assert_eq!(u, "u");
         assert_eq!(p, "p");
         assert_eq!(n, "n");
@@ -661,12 +690,53 @@ mod tests {
         assert!(!raw[0].2.is_empty());
     }
 
+    /// F3: a row that will not decrypt returns a diagnosable error rather than
+    /// panicking. Before this, the natural follow-up to a failed `sk2 verify` --
+    /// `get`, `edit`, `rename`, `export`, `change-password` -- met a raw Rust panic,
+    /// in exactly the situation where a user most needs to be told what to do.
+    #[test]
+    fn corrupt_row_returns_error_rather_than_panicking() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "svc", "u", "p", "", "");
+        conn.execute(
+            "UPDATE credentials SET ciphertext = X'0001020304' WHERE service = 'svc'",
+            [],
+        )
+        .unwrap();
+
+        let err = get_credential(&conn, &TEST_KEY, "svc").unwrap_err();
+        assert!(err.contains("may be corrupt"), "got: {err}");
+        assert!(
+            err.contains("sk2 verify"),
+            "the message must point at the recovery path: {err}"
+        );
+    }
+
+    /// Same guarantee on the rename path, which decrypts under the old service name
+    /// as AAD before re-encrypting under the new one.
+    #[test]
+    fn corrupt_row_rename_returns_error_rather_than_panicking() {
+        let conn = setup();
+        add_credential(&conn, &TEST_KEY, "old", "u", "p", "", "");
+        conn.execute(
+            "UPDATE credentials SET ciphertext = X'0001020304' WHERE service = 'old'",
+            [],
+        )
+        .unwrap();
+
+        let err = rename_credential(&conn, &TEST_KEY, "old", "new").unwrap_err();
+        assert!(err.contains("may be corrupt"), "got: {err}");
+        // The original row must survive a failed rename.
+        assert!(service_exists(&conn, "old"));
+        assert!(!service_exists(&conn, "new"));
+    }
+
     #[test]
     fn sql_injection_resistance() {
         let conn = setup();
         let evil = "'; DROP TABLE credentials; --";
         add_credential(&conn, &TEST_KEY, evil, "u", "p", "", "");
-        let result = get_credential(&conn, &TEST_KEY, evil);
+        let result = get_credential(&conn, &TEST_KEY, evil).unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap().0, "u");
     }
@@ -684,7 +754,9 @@ mod tests {
             "",
         );
         assert!(service_exists(&conn, "日本語サービス"));
-        let (u, _, _, _, _) = get_credential(&conn, &TEST_KEY, "日本語サービス").unwrap();
+        let (u, _, _, _, _) = get_credential(&conn, &TEST_KEY, "日本語サービス")
+            .unwrap()
+            .unwrap();
         assert_eq!(u, "ユーザー");
     }
 }

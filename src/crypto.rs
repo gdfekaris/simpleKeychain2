@@ -134,8 +134,15 @@ pub(crate) enum Charset {
     Dna,
 }
 
-pub(crate) fn generate_password(length: usize, charset: &Charset) -> Zeroizing<String> {
-    let chars: &[u8] = match charset {
+/// The alphabet a charset draws from. Single source of truth: `generate_password`
+/// samples from it and `main::validated_generate` takes `.len()` for the entropy
+/// estimate, so the two cannot disagree.
+///
+/// They previously did. `validated_generate` restated the sizes as `74/62/66/16/4`
+/// and the default alphabet is **75** characters, so every entropy figure for the
+/// default charset was quietly understated.
+pub(crate) fn charset_bytes(charset: &Charset) -> &'static [u8] {
+    match charset {
         Charset::Default => {
             b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*-_=+?"
         }
@@ -143,7 +150,11 @@ pub(crate) fn generate_password(length: usize, charset: &Charset) -> Zeroizing<S
         Charset::Websafe => b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~",
         Charset::Hex => b"0123456789abcdef",
         Charset::Dna => b"ACGT",
-    };
+    }
+}
+
+pub(crate) fn generate_password(length: usize, charset: &Charset) -> Zeroizing<String> {
+    let chars: &[u8] = charset_bytes(charset);
     let mut rng = rand::thread_rng();
     let password: String = (0..length)
         .map(|_| chars[rng.gen_range(0..chars.len())] as char)
@@ -540,6 +551,41 @@ mod tests {
         let a = generate_password(32, &Charset::Default);
         let b = generate_password(32, &Charset::Default);
         assert_ne!(*a, *b);
+    }
+
+    /// `main::validated_generate` reports entropy as `length * log2(charset.len())`.
+    /// That is only honest if each alphabet is duplicate-free — a repeated character
+    /// would make the true entropy lower than the figure shown to the user.
+    #[test]
+    fn charsets_contain_no_duplicate_characters() {
+        for charset in [
+            Charset::Default,
+            Charset::Alphanumeric,
+            Charset::Websafe,
+            Charset::Hex,
+            Charset::Dna,
+        ] {
+            let bytes = charset_bytes(&charset);
+            let mut seen = std::collections::HashSet::new();
+            for b in bytes {
+                assert!(
+                    seen.insert(b),
+                    "duplicate character {:?} would overstate reported entropy",
+                    *b as char
+                );
+            }
+        }
+    }
+
+    /// F7a: the entropy estimate is derived from this table rather than restating it.
+    /// The default alphabet is 75 characters — it was previously hardcoded as 74.
+    #[test]
+    fn default_charset_is_75_characters() {
+        assert_eq!(charset_bytes(&Charset::Default).len(), 75);
+        assert_eq!(charset_bytes(&Charset::Alphanumeric).len(), 62);
+        assert_eq!(charset_bytes(&Charset::Websafe).len(), 66);
+        assert_eq!(charset_bytes(&Charset::Hex).len(), 16);
+        assert_eq!(charset_bytes(&Charset::Dna).len(), 4);
     }
 
     // -- password_entropy (3 tests) --

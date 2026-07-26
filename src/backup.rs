@@ -12,8 +12,11 @@ pub(crate) const BACKUP_VERSION: u8 = 0x01;
 
 const HEADER_LEN: usize = 4 + 1 + 16 + 24; // magic + version + salt + nonce = 45
 
+/// RFC 4180 field escaping, shared by both export paths. Note it quotes and doubles
+/// embedded quotes but writes newlines raw — legal, and the reason the importer must
+/// parse whole-text rather than line-by-line (see `parse_csv_records`).
 #[cfg(feature = "export")]
-fn csv_escape(field: &str) -> String {
+pub(crate) fn csv_escape(field: &str) -> String {
     format!("\"{}\"", field.replace('"', "\"\""))
 }
 
@@ -282,6 +285,7 @@ mod tests {
 
         for (svc, u, p, n, url) in &credentials {
             let (got_u, got_p, got_n, got_url, _) = db::get_credential(&conn2, &TEST_KEY, svc)
+                .unwrap()
                 .unwrap_or_else(|| panic!("missing credential for '{svc}'"));
             assert_eq!(&got_u, u, "username mismatch for {svc}");
             assert_eq!(&got_p, p, "password mismatch for {svc}");
@@ -369,7 +373,9 @@ mod tests {
         let count = import_vault(&target, &TEST_KEY, &blob, "pass").unwrap();
         assert_eq!(count, 1);
 
-        let (u, p, n, url, _) = db::get_credential(&target, &TEST_KEY, "github").unwrap();
+        let (u, p, n, url, _) = db::get_credential(&target, &TEST_KEY, "github")
+            .unwrap()
+            .unwrap();
         assert_eq!(u, "new_user");
         assert_eq!(p, "new_pass");
         assert_eq!(n, "imported");
@@ -389,7 +395,9 @@ mod tests {
         let count = import_vault(&target, &TEST_KEY, &blob, "pass").unwrap();
         assert_eq!(count, 1);
 
-        let (u, p, n, _, _) = db::get_credential(&target, &TEST_KEY, "private").unwrap();
+        let (u, p, n, _, _) = db::get_credential(&target, &TEST_KEY, "private")
+            .unwrap()
+            .unwrap();
         assert_eq!(u, "me");
         assert_eq!(p, "secret");
         assert_eq!(n, "keep");
@@ -407,7 +415,9 @@ mod tests {
         let count = import_vault(&target, &TEST_KEY, &blob, "pass").unwrap();
         assert_eq!(count, 0);
 
-        let (u, _, _, _, _) = db::get_credential(&target, &TEST_KEY, "existing").unwrap();
+        let (u, _, _, _, _) = db::get_credential(&target, &TEST_KEY, "existing")
+            .unwrap()
+            .unwrap();
         assert_eq!(u, "u");
     }
 
@@ -451,10 +461,14 @@ mod tests {
         assert!(err.contains("Expected 3 or 5"), "got: {err}");
 
         assert!(
-            db::get_credential(&target, &TEST_KEY, "good_svc").is_none(),
+            db::get_credential(&target, &TEST_KEY, "good_svc")
+                .unwrap()
+                .is_none(),
             "good_svc should not exist after rollback"
         );
-        let (u, p, _, _, _) = db::get_credential(&target, &TEST_KEY, "existing").unwrap();
+        let (u, p, _, _, _) = db::get_credential(&target, &TEST_KEY, "existing")
+            .unwrap()
+            .unwrap();
         assert_eq!(u, "eu");
         assert_eq!(p, "ep");
     }
@@ -483,7 +497,9 @@ mod tests {
         let count = import_vault(&target, &TEST_KEY, &blob, "bp").unwrap();
         assert_eq!(count, 1);
 
-        let (u, p, n, url, _) = db::get_credential(&target, &TEST_KEY, "legacy_svc").unwrap();
+        let (u, p, n, url, _) = db::get_credential(&target, &TEST_KEY, "legacy_svc")
+            .unwrap()
+            .unwrap();
         assert_eq!(u, "legacy_user");
         assert_eq!(p, "legacy_pass");
         assert_eq!(n, "", "notes should default to empty for 3-column rows");
