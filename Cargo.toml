@@ -30,3 +30,19 @@ zeroize = { version = "1.8", features = ["alloc"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Same crate already in the dependency graph above -- integration tests are separate
+# crates and cannot see the binary's dependencies, so it must be listed again here.
+# Adds nothing new to Cargo.lock. Used by tests/cli.rs for forkpty.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+# Argon2 is deliberately expensive (128 MiB, 4 passes). Unoptimized it dominates
+# test runtime -- the suite derives keys dozens of times, and the PTY integration
+# tests drive real unlock prompts. Optimizing just the KDF crates keeps `cargo test`
+# quick without optimizing the code under test.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
