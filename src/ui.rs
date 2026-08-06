@@ -162,6 +162,20 @@ pub(crate) fn password_strength(entropy: f64) {
     }
 }
 
+/// Sterner than `generate_warning`: this is a *stored* credential, not a throwaway.
+pub(crate) fn print_warning() {
+    eprintln!(
+        "{} Printing a stored password. It will remain in terminal scrollback and any session logs — clear or close this terminal when you are done.",
+        "[!]".yellow().bold(),
+    );
+}
+
+/// Bare value on stdout, no styling, no label — so `$(sk2 get svc --print)`
+/// captures exactly the secret and nothing else.
+pub(crate) fn raw_line(value: &str) {
+    println!("{value}");
+}
+
 pub(crate) fn generate_warning() {
     eprintln!(
         "{} This password is visible in your terminal. Only use {} for throwaway passwords.",

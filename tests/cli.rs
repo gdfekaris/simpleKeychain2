@@ -428,29 +428,57 @@ fn invalid_flags_are_rejected_before_any_prompt() {
 
 /// `generate` is the one command that needs neither a vault nor a master password.
 ///
-/// The exit code is deliberately not asserted. `generate` copies to the clipboard and
-/// treats a clipboard failure as fatal, so on a headless runner it prints the password
-/// and *then* exits non-zero. Asserting success here would make this test fail in CI
-/// for a reason that has nothing to do with what it is checking. The properties that
-/// matter — no vault, no master password, a password actually produced — hold either
-/// way.
+/// F11: the clipboard is an enhancement, not a requirement — the password is already
+/// printed, so a clipboard failure warns and the command still exits 0. That is what
+/// makes the exit code assertable here on headless and desktop machines alike (it
+/// previously exited 1 on any runner without a display, breaking `set -e` scripts).
 #[test]
 fn generate_needs_no_vault() {
     let s = Scratch::new("generate");
     let missing = s.path("does-not-exist.db");
 
-    let out = sk2(&["--vault", &missing, "generate", "-l", "32", "-c", "hex"]).finish();
-
-    out.assert_silent_about("Master password")
+    sk2(&["--vault", &missing, "generate", "-l", "32", "-c", "hex"])
+        .finish()
+        .assert_ok()
+        .assert_silent_about("Master password")
         .assert_says("Password:");
-    if out.code != 0 {
-        out.assert_says("clipboard");
-    }
 
     assert!(
         !Path::new(&missing).exists(),
         "generate must not create a vault"
     );
+}
+
+/// F11: `get --print` writes the bare secret to stdout with a warning on stderr and
+/// skips the clipboard entirely. Skipping the clipboard is also what makes `get`
+/// assertable in this suite at all — the clipboard path fails on a headless runner,
+/// so no `get` invocation had ever been end-to-end tested before this flag existed.
+#[test]
+fn get_print_displays_the_password() {
+    let s = Scratch::new("getprint");
+    let v = s.vault();
+
+    init_vault(&v);
+    add(&v, "github", "octocat", "gh-pass-123");
+
+    sk2(&["--vault", &v, "get", "github", "--print"])
+        .answer("master password", MASTER)
+        .finish()
+        .assert_ok()
+        .assert_says("gh-pass-123")
+        .assert_says("scrollback") // the stern stored-password warning fired
+        .assert_silent_about("copied to clipboard");
+
+    // With --username the username is printed instead, without the password —
+    // and without the password warning, since usernames are shown in plaintext
+    // by a normal `get` anyway.
+    sk2(&["--vault", &v, "get", "github", "--username", "--print"])
+        .answer("master password", MASTER)
+        .finish()
+        .assert_ok()
+        .assert_says("octocat")
+        .assert_silent_about("gh-pass-123")
+        .assert_silent_about("scrollback");
 }
 
 #[cfg(all(feature = "export", feature = "import"))]

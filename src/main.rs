@@ -118,6 +118,10 @@ enum Command {
         /// Copy the username to clipboard instead of the password
         #[arg(long)]
         username: bool,
+        /// Print the value to stdout instead of copying it to the clipboard
+        /// (for headless machines and scripting; the password stays in scrollback)
+        #[arg(long)]
+        print: bool,
     },
     /// Delete a credential by service name
     Delete {
@@ -319,31 +323,41 @@ fn handle_generate(length: usize, charset: crypto::Charset) -> Result<(), String
     ui::generate_warning();
     ui::generated_password(&password);
 
-    let mut clipboard = Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
-    clipboard
-        .set_text(password.as_str())
-        .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
-
-    match std::env::current_exe() {
-        Ok(exe) => {
-            let result = process::Command::new(exe)
-                .arg("--clear-clipboard")
-                .arg(CLIPBOARD_CLEAR_SECONDS.to_string())
-                .stdin(process::Stdio::null())
-                .stdout(process::Stdio::null())
-                .stderr(process::Stdio::null())
-                .spawn();
-            if let Err(e) = result {
-                ui::warning(&format!("Could not spawn clipboard-clear process: {e}"));
+    // The clipboard is an enhancement here, not a requirement (F11): the password is
+    // already printed, so on a headless machine this warns and still exits 0 —
+    // a non-zero exit was breaking `set -e` scripts over a purely cosmetic failure.
+    let clipboard = Clipboard::new().and_then(|mut c| c.set_text(password.as_str()).map(|()| c));
+    match clipboard {
+        Ok(_clipboard) => {
+            // _clipboard must stay alive through the sleep below: dropping it can
+            // forfeit the X11 selection before a clipboard manager grabs it.
+            match std::env::current_exe() {
+                Ok(exe) => {
+                    let result = process::Command::new(exe)
+                        .arg("--clear-clipboard")
+                        .arg(CLIPBOARD_CLEAR_SECONDS.to_string())
+                        .stdin(process::Stdio::null())
+                        .stdout(process::Stdio::null())
+                        .stderr(process::Stdio::null())
+                        .spawn();
+                    if let Err(e) = result {
+                        ui::warning(&format!("Could not spawn clipboard-clear process: {e}"));
+                    }
+                }
+                Err(e) => {
+                    ui::warning(&format!("Could not determine executable path: {e}"));
+                }
             }
+
+            ui::clipboard_notice("Password:", CLIPBOARD_CLEAR_SECONDS);
+            thread::sleep(Duration::from_millis(100));
         }
         Err(e) => {
-            ui::warning(&format!("Could not determine executable path: {e}"));
+            ui::warning(&format!(
+                "Clipboard unavailable ({e}). The password above was NOT copied."
+            ));
         }
     }
-
-    ui::clipboard_notice("Password:", CLIPBOARD_CLEAR_SECONDS);
-    thread::sleep(Duration::from_millis(100));
     Ok(())
 }
 
@@ -419,23 +433,42 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Get {
             service,
             username: copy_username,
+            print,
         } => {
             let key = vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
             match db::get_credential(&conn, &key, &service)? {
                 Some((username, password, notes, url, updated_at)) => {
                     let password = Zeroizing::new(password);
+                    if print {
+                        // Explicit opt-in to on-screen disclosure (F11). The value goes
+                        // to stdout and *nothing else does*, so command substitution
+                        // captures it cleanly; the clipboard is skipped entirely rather
+                        // than exposing the secret through two channels at once.
+                        if !copy_username {
+                            ui::print_warning();
+                        }
+                        ui::raw_line(if copy_username { &username } else { &password });
+                        return Ok(());
+                    }
                     let clipboard_text: &str = if copy_username { &username } else { &password };
                     let clipboard_label = if copy_username {
                         "Username:"
                     } else {
                         "Password:"
                     };
-                    let mut clipboard =
-                        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
-                    clipboard
-                        .set_text(clipboard_text)
-                        .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
+                    // Without --print the clipboard is the only disclosure channel, so
+                    // failing here must stay an error — but one that names the way out.
+                    let mut clipboard = Clipboard::new().map_err(|e| {
+                        format!(
+                            "Failed to access clipboard: {e}. Re-run with --print to display the value instead."
+                        )
+                    })?;
+                    clipboard.set_text(clipboard_text).map_err(|e| {
+                        format!(
+                            "Failed to copy to clipboard: {e}. Re-run with --print to display the value instead."
+                        )
+                    })?;
 
                     // Spawn a detached child process to clear the clipboard after the timeout.
                     match std::env::current_exe() {

@@ -155,6 +155,14 @@ To copy the username to clipboard instead:
 sk2 get github --username
 ```
 
+On a machine with no clipboard — a headless server, an SSH session without forwarding — the clipboard is unavailable and `get` fails rather than silently changing where the secret goes. To display the value instead, opt in explicitly:
+
+```bash
+sk2 get github --print
+```
+
+`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. Be aware of what you are trading: printed output has no 10-second clear — it stays in your terminal scrollback and any session logs until you clear them. Prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
+
 If no exact match is found, sk2 falls back to a case-insensitive substring search. A single match is used automatically; multiple matches are shown as a numbered list to pick from.
 
 ### Edit a credential
@@ -450,7 +458,7 @@ in **[CHANGELOG.md](CHANGELOG.md)**.
 - **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
 - **Key-derivation parameters** — Each vault records the Argon2id parameters it was created with, and is always unlocked using its own recorded values. A future release can raise the cost without locking existing vaults out; run `sk2 change-password` to re-key an existing vault under the newer, stronger parameters. Backups are separate: the `.sk2backup` format fixes its parameters as part of the container, so backups stay readable by any version of sk2 and by the iOS app.
 - **Memory** — Secrets (master password, derived key, decrypted passwords) are held in `Zeroizing` wrappers and wiped when they go out of scope, including on error paths (e.g. wrong password, empty input) and on panics, since those unwind. This is best-effort rather than a guarantee: some intermediate buffers — notably the JSON serialization inside encrypt/decrypt — are ordinary allocations that are not wiped, so a memory dump or swap file could still contain plaintext. See `SECURITY.md`.
-- **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds.
+- **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds. `get` never prints a password unless you explicitly pass `--print`; if the clipboard is unavailable (headless machine, SSH without forwarding), `get` fails with a message naming that flag rather than printing on its own initiative. `generate` — which prints by design — treats a clipboard failure as a warning, not an error. Note that `--print` output has no equivalent of the 10-second clear: it persists in terminal scrollback and session logs.
 - **File permissions** — On Linux/macOS, sk2 applies a process-wide `umask` of `0077` before touching the filesystem, so everything it creates is owner-only from the moment it exists. `~/.sk2/` is created directly at `0700`, `vault.db` inherits `0600`, and backup files are opened with an explicit `0600` mode. Permissions are established at creation time rather than tightened afterward, which removes the window in which a newly created file would be briefly readable by others. On Windows, files inherit default ACLs — there is no equivalent hardening.
 - **Vault location** — By default, the vault is stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). Override with `--vault` or the `SK2_VAULT` environment variable (flag takes precedence). Parent directories are created automatically.
 - **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, or choose a backup passphrase during `export`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
@@ -477,4 +485,4 @@ cargo test export::tests
 
 ## Platform Support
 
-Works on **Linux**, **macOS**, and **Windows**. Clipboard support is provided by [arboard](https://github.com/1Password/arboard) (maintained by 1Password).
+Works on **Linux**, **macOS**, and **Windows**. Clipboard support is provided by [arboard](https://github.com/1Password/arboard) (maintained by 1Password) and requires a display server; on headless machines use `sk2 get <service> --print` to retrieve a password (`generate` works everywhere, warning if it cannot copy).

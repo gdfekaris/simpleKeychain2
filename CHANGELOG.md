@@ -7,6 +7,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). sk2 is a comm
 rather than a library, so "breaking" refers to changes in CLI behaviour, the on-disk vault format, or
 backup compatibility — not to a Rust API.
 
+## [Unreleased]
+
+sk2 now works on headless machines — servers, SSH sessions without display forwarding, containers.
+Previously `get` could not retrieve a password at all without a clipboard, and `generate` exited
+with an error after printing.
+
+### Added
+
+- **`get --print`** displays the password instead of copying it, as an explicit opt-in. The bare
+  value is written to stdout with nothing else, so `PASS=$(sk2 get github --print)` captures
+  exactly the secret; a warning goes to stderr, and the clipboard is skipped entirely. Combined
+  with `--username`, it prints the username instead. Deliberately *not* an automatic fallback:
+  when the clipboard is unavailable, plain `get` still fails — with a message naming `--print` —
+  rather than letting the environment silently decide whether a stored password appears on screen.
+  Note the trade: printed output has no 10-second clear and stays in terminal scrollback and
+  session logs.
+
+### Fixed
+
+- **`generate` no longer exits with an error when the clipboard is unavailable.** The password is
+  printed before the clipboard is touched, so the failure was purely cosmetic — but the non-zero
+  exit broke `set -e` scripts. It now warns that the password was not copied and exits 0.
+
 ## [1.2.0] — 2026-08-05
 
 The headline item is a data-loss fix in the legacy GPG import path. If you keep multi-line notes and
