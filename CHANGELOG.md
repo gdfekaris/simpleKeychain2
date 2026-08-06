@@ -7,10 +7,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). sk2 is a comm
 rather than a library, so "breaking" refers to changes in CLI behaviour, the on-disk vault format, or
 backup compatibility — not to a Rust API.
 
-## [1.2.0] — 2026-07-25
+## [1.2.0] — 2026-08-05
 
 The headline item is a data-loss fix in the legacy GPG import path. If you keep multi-line notes and
 have ever restored from a `.csv.gpg` backup, please read the first entry under *Fixed*.
+
+This is also the first release with prebuilt binaries. Each archive ships with two independent
+verification mechanisms — minisign-signed checksums and GitHub build provenance attestation — and
+`SECURITY.md` explains how to check both.
 
 ### Fixed
 
@@ -35,6 +39,11 @@ have ever restored from a `.csv.gpg` backup, please read the first entry under *
 
 ### Added
 
+- **Prebuilt, verifiable release binaries** for Linux (x86_64, fully static), macOS (Apple silicon
+  and Intel), and Windows (x86_64), each archive containing the binary already named `sk2`. Every
+  release publishes a `SHA256SUMS` file signed with the maintainer's minisign key — the signature is
+  made on the maintainer's machine, never in CI — plus a per-archive build provenance attestation.
+  Verification instructions are in `SECURITY.md`.
 - **Password-strength feedback when choosing a backup passphrase** during `export`, matching what
   `add`, `edit` and `change-password` already did. That passphrase protects every credential at once
   in a file meant to leave your machine, so it is the one most worth getting right.
@@ -70,8 +79,11 @@ have ever restored from a `.csv.gpg` backup, please read the first entry under *
 
 ### Internal
 
-- Test suite grew from 80 to 107, covering the multi-line-note round trip, per-vault key-derivation
-  parameters, corrupt-row handling, and the first tests for `main.rs`.
+- Test suite grew from 80 to 118, covering the multi-line-note round trip, per-vault key-derivation
+  parameters, corrupt-row handling, and the first tests for `main.rs` — plus a new end-to-end suite
+  that drives the real binary through a pseudo-terminal, finally exercising every interactive
+  prompt (`init`, `add`, `edit`, `rename`, `change-password`, export/import) exactly as a user
+  types them.
 - CI now lints test code (`--all-targets`), verifies the minimum supported Rust version, and runs
   `cargo audit` weekly as well as on push.
 - Development consolidated onto a single `main` branch.
