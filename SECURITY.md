@@ -128,6 +128,7 @@ minisign -Vm SHA256SUMS -P RWS11s9lPe0uHbOvhlPE8TLPZGoW14AjTY+K1WK+RvTalQhyd+coa
 # or, with the Rust implementation:  rsign verify SHA256SUMS -P <same key>
 
 sha256sum -c SHA256SUMS --ignore-missing
+# macOS ships no sha256sum; use:  shasum -a 256 --ignore-missing -c SHA256SUMS
 ```
 
 ### 2. Build provenance attestation
