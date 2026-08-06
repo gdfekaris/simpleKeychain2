@@ -131,11 +131,13 @@ fn spawn_at(binary: &str, args: &[&str]) -> Session {
     // SAFETY: forkpty writes the master descriptor into `master_fd`. In the child
     // (pid == 0) we immediately execv with pointers prepared above and never return;
     // on failure we _exit without unwinding.
+    // The termios/winsize pointers are null_mut, not null: macOS declares them
+    // `*mut` where Linux declares `*const`, and only `*mut` coerces to both.
     let pid = unsafe {
         libc::forkpty(
             &mut master_fd,
             std::ptr::null_mut(),
-            std::ptr::null(),
+            std::ptr::null_mut(),
             std::ptr::null_mut(),
         )
     };
