@@ -1,0 +1,148 @@
+name: Release
+
+# Triggered by pushing a version tag. Builds every supported target, ships the
+# binary already named `sk2` (the crate builds `simpleKeychain2`, but users are
+# told to use `sk2` -- releases should not make them do the rename), attests
+# provenance, and assembles a DRAFT release with a SHA256SUMS file.
+#
+# Publishing is deliberately manual. The checksum signature is made on the
+# maintainer's machine with a key that never touches GitHub, so the two
+# verification mechanisms stay independent: forging a release would require
+# compromising both this workflow AND the maintainer's key. The maintainer
+# downloads SHA256SUMS from the draft, signs it, uploads SHA256SUMS.minisig,
+# and publishes. Steps in RELEASING.md.
+#
+# Code quality is not gated here -- CI already ran on the commit being tagged.
+# RELEASING.md makes checking that a precondition of tagging.
+
+on:
+  push:
+    tags: ['v*']
+  # Dry run from the Actions tab: exercises the whole build matrix and the
+  # packaging steps without a tag, so the first real tag push is not also the
+  # first test of the musl/cross toolchains. Attestation and the draft release
+  # are skipped -- nothing is published.
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the draft release and upload assets
+  id-token: write # mint the OIDC identity that signs the attestation
+  attestations: write # store the provenance attestation
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # If any target fails, stop the whole release rather than drafting a
+      # partial one.
+      fail-fast: true
+      matrix:
+        include:
+          # musl rather than gnu: a fully static binary with no glibc floor,
+          # so one Linux artifact runs on old and new distros alike. Worth it
+          # here because rusqlite bundles SQLite as C, which musl-gcc handles.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Intel macs still exist; the arm64 runner cross-compiles this fine.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # A tag that disagrees with Cargo.toml would publish artifacts whose
+      # --version output contradicts their filename. Refuse early, on every
+      # matrix job, before any build minutes are spent.
+      - name: Check tag against Cargo.toml version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          if [ "$tag" != "$crate" ]; then
+            echo "tag is v$tag but Cargo.toml says $crate" >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      # --locked: build exactly the dependency tree that CI tested and
+      # cargo audit scanned, or fail loudly.
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          # On a dry run GITHUB_REF_NAME is a branch name, so the archive is
+          # visibly labeled e.g. sk2-main-<target> rather than a version.
+          version="${GITHUB_REF_NAME#v}"
+          dir="sk2-${version}-${{ matrix.target }}"
+          mkdir "$dir"
+          cp README.md LICENSE CHANGELOG.md SECURITY.md "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/simpleKeychain2.exe" "$dir/sk2.exe"
+            7z a "$dir.zip" "$dir"
+          else
+            cp "target/${{ matrix.target }}/release/simpleKeychain2" "$dir/sk2"
+            tar czf "$dir.tar.gz" "$dir"
+          fi
+
+      # Attest the archive itself -- the file users download and verify --
+      # not the bare binary inside it.
+      - name: Attest build provenance
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            sk2-*.tar.gz
+            sk2-*.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sk2-${{ matrix.target }}
+          path: |
+            sk2-*.tar.gz
+            sk2-*.zip
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft the release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      # gh infers the repository from the checkout.
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # One SHA256SUMS over every archive, generated where all of them are in
+      # one place. This is the file the maintainer signs locally.
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: sha256sum -- * | tee SHA256SUMS
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft \
+            --title "sk2 $GITHUB_REF_NAME" \
+            --notes "See CHANGELOG.md for what changed. Verify downloads as described in SECURITY.md -- SHA256SUMS.minisig is uploaded by the maintainer before this release is published; if it is missing, the release is not ready."

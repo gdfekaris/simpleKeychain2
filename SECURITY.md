@@ -99,13 +99,55 @@ These are deliberate trade-offs or accepted gaps, documented so you can judge th
 
 ## Verifying downloads
 
-Not yet available. sk2 is currently distributed as source only — build it yourself with
-`cargo build --release`, and you are running exactly the code in this repository at the commit you
-checked out.
+Release binaries (v1.2.0 and later) ship with two independent verification mechanisms. They prove
+different things, and they fail independently: the checksum signature is made on the maintainer's
+machine with a key that is never given to CI, while the attestation is made by GitHub's
+infrastructure with no long-lived key at all. Check both if you can; either alone is far better
+than neither.
 
-Signed and attested release binaries are planned. Until they exist, treat any prebuilt "sk2" binary
-offered elsewhere as untrusted: nothing published so far has been signed by this project, so there
-is nothing to verify it against.
+Anything predating v1.2.0, or any prebuilt "sk2" binary found elsewhere, is unsigned and should be
+treated as untrusted — build from source instead.
+
+### 1. Signed checksums (minisign)
+
+Every release includes `SHA256SUMS` and a detached signature `SHA256SUMS.minisig`, made with the
+maintainer's [minisign](https://jedisct1.github.io/minisign/) key. This proves the checksums were
+approved by the holder of the key — not by whoever happened to control the GitHub repository.
+
+The public key, which should be identical everywhere it appears (here, `RELEASING.md`, and the
+maintainer's GitHub profile — if the copies disagree, trust none of them and open an issue):
+
+```
+RWS11s9lPe0uHbOvhlPE8TLPZGoW14AjTY+K1WK+RvTalQhyd+coaEwj
+```
+
+Verify the signature, then the file you downloaded:
+
+```bash
+minisign -Vm SHA256SUMS -P RWS11s9lPe0uHbOvhlPE8TLPZGoW14AjTY+K1WK+RvTalQhyd+coaEwj
+# or, with the Rust implementation:  rsign verify SHA256SUMS -P <same key>
+
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+### 2. Build provenance attestation
+
+Each archive is attested with [GitHub build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations),
+which proves it was built by this repository's release workflow, from this repository's code, at
+the tagged commit — not built elsewhere and uploaded. Requires the `gh` CLI:
+
+```bash
+gh attestation verify sk2-1.2.0-x86_64-unknown-linux-musl.tar.gz \
+    --repo gdfekaris/simpleKeychain2
+```
+
+### What verification does not prove
+
+Both mechanisms establish *where the bytes came from*, not that the code is free of defects. And
+platform code-signing is a separate, unrelated system: sk2 binaries are **not** Apple-notarized or
+Windows-Authenticode-signed (both are paid programs), so macOS Gatekeeper and Windows SmartScreen
+will warn on first run even for a fully verified download. On macOS:
+`xattr -d com.apple.quarantine sk2` after verifying.
 
 ## Cryptography
 

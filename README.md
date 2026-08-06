@@ -13,6 +13,27 @@ A lightweight, local-only CLI password manager. No servers, no sync, no network.
 
 ## Installation
 
+### Option 1 — download a release
+
+Prebuilt binaries for Linux (x86_64, fully static), macOS (Apple silicon and Intel), and Windows
+(x86_64) are on the [releases page](https://github.com/gdfekaris/simpleKeychain2/releases). Each
+archive contains the binary already named `sk2` plus this documentation.
+
+**Verify before running** — every release ships signed checksums and a build provenance
+attestation; the commands are in [SECURITY.md](SECURITY.md#verifying-downloads). The short version:
+
+```bash
+minisign -Vm SHA256SUMS -P RWS11s9lPe0uHbOvhlPE8TLPZGoW14AjTY+K1WK+RvTalQhyd+coaEwj
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf sk2-<version>-<target>.tar.gz && cp sk2-*/sk2 ~/.local/bin/
+```
+
+Two platform warnings to expect, because sk2's binaries are not enrolled in the paid Apple/Microsoft
+code-signing programs (this is unrelated to the verification above): macOS quarantines the binary
+until `xattr -d com.apple.quarantine sk2`, and Windows SmartScreen needs "More info → Run anyway".
+
+### Option 2 — build from source
+
 Requires [Rust](https://www.rust-lang.org/tools/install) 1.88 or newer.
 
 ```bash
@@ -21,13 +42,13 @@ cd simpleKeychain2
 cargo build --release
 ```
 
-### Linux / macOS
+#### Linux / macOS
 
 ```bash
 cp target/release/simpleKeychain2 ~/.local/bin/sk2
 ```
 
-### Windows
+#### Windows
 
 Requires [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (for compiling the bundled SQLite C library).
 
