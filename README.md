@@ -448,6 +448,8 @@ Import can also be used to recover corrupt credentials found by `sk2 verify` —
 
   A *malformed quote* is the exception: because notes may legitimately contain newlines, a stray or unterminated quote misaligns every record after it, so it cannot be attributed to a single row. The whole import aborts with an error and nothing is written. Either way a rejected file never leaves the vault half-populated: GPG imports validate the entire file before writing anything, and SK2B imports run inside a transaction that rolls back on the first bad row.
 
+- **Exports are all-or-nothing in both formats.** If any credential fails to decrypt, the export aborts and no file is written — you are told which entry failed and pointed at `sk2 verify`. A backup exists to be trusted later, and one that silently omits entries is worse than no backup at all, because you stop looking for the missing data. Nothing is lost by failing: the unreadable credential was already unreadable, and the fix is to repair it (`sk2 import` from an older backup) or drop it (`sk2 delete`) and reset that password upstream. A credential *deleted* while the export is running is a different case and is simply reported and omitted — there is no data to lose.
+
 ### Round-trip example
 
 ```bash

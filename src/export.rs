@@ -101,14 +101,26 @@ pub(crate) fn export_sk2b(
     Ok(())
 }
 
-/// Build the GPG export CSV. Returns it with the number of rows actually written
-/// and the number skipped.
+/// Build the GPG export CSV. Returns it with the number of rows written and the
+/// number skipped, or `Err` if any row will not decrypt.
 ///
-/// Split out of `export_gpg` so the counts are testable. The success line used to
-/// report `services.len()`, captured before the loop — but the loop skips rows that
-/// vanished or will not decrypt, so a vault with an unreadable entry announced more
-/// credentials than the file contained. Per-row warnings were printed either way;
-/// the summary contradicted them.
+/// **A corrupt row aborts the export.** This matches SK2B, which has always failed
+/// on the first row it cannot decrypt. The GPG path used to warn and continue, on
+/// the reasoning that a partial backup of the readable entries beats none — that
+/// was reversed deliberately on 2026-08-07 (see F3 in `project-assessment.md`).
+/// The argument against it: a backup's whole purpose is to be trusted later, and
+/// one that silently omits entries is worse than an absent one, because the user
+/// stops looking for the missing data. Nothing is lost by failing here — the
+/// unreadable credential was already unreadable, and `sk2 verify` plus `sk2 import`
+/// or `sk2 delete` is the actual recovery path.
+///
+/// A *vanished* row is different and still warns-and-skips: it means the credential
+/// was deleted between `list_services` and now, so there is no data to lose and
+/// nothing to diagnose. Failing there would be friction buying no safety. (SK2B
+/// cannot hit this case at all — `get_all_credentials_raw` is a single query, so it
+/// has no list-then-fetch window.)
+///
+/// Split out of `export_gpg` so the counts and this abort are testable.
 ///
 /// The CSV holds every credential in plaintext, so it stays inside `Zeroizing` and
 /// is returned by move. There is deliberately no unwrapped intermediate here — see
@@ -117,7 +129,7 @@ fn build_gpg_csv(
     conn: &Connection,
     key: &[u8; KEY_LEN],
     services: &[String],
-) -> (Zeroizing<String>, usize, usize) {
+) -> Result<(Zeroizing<String>, usize, usize), String> {
     let mut csv = Zeroizing::new(String::from("name,username,password,notes,url\n"));
     let mut exported = 0usize;
     let mut skipped = 0usize;
@@ -143,16 +155,15 @@ fn build_gpg_csv(
                 skipped += 1;
             }
             Err(e) => {
-                // Corrupt row. Skip it rather than aborting the export -- a partial
-                // backup of the readable entries is more useful than none, and the
-                // message says exactly which entry was lost.
-                ui::warning(&format!("{e} Skipping it in this export."));
-                skipped += 1;
+                // `e` is db::decrypt_failure — it already names the entry and the
+                // recovery path. Returning here is what keeps a partial backup off
+                // disk: the caller has not opened the output file yet.
+                return Err(format!("{e} No backup file was written."));
             }
         }
     }
 
-    (csv, exported, skipped)
+    Ok((csv, exported, skipped))
 }
 
 pub(crate) fn export_gpg(
@@ -194,7 +205,10 @@ pub(crate) fn export_gpg(
         return Err("Export cancelled.".into());
     }
 
-    let (csv, exported, skipped) = build_gpg_csv(conn, key, &services);
+    // Deliberately after the confirmation prompt, not before it: this materializes
+    // every credential in plaintext, and that buffer should not sit in memory across
+    // an indefinite wait for the user to type "yes".
+    let (csv, exported, skipped) = build_gpg_csv(conn, key, &services)?;
 
     // Open our own output file (H7 fix: do not let gpg --output create the file).
     let mut file = open_output(output, overwrite)?;
@@ -337,7 +351,7 @@ mod tests {
         db::add_credential(&conn, &TEST_KEY, "b", "ub", "pb", "", "");
 
         let services = db::list_services(&conn);
-        let (csv, exported, skipped) = build_gpg_csv(&conn, &TEST_KEY, &services);
+        let (csv, exported, skipped) = build_gpg_csv(&conn, &TEST_KEY, &services).unwrap();
 
         assert_eq!(exported, 2);
         assert_eq!(skipped, 0);
@@ -348,11 +362,12 @@ mod tests {
         );
     }
 
-    /// The bug this function was extracted for: an unreadable row is skipped, so the
-    /// count reported to the user must come from rows actually written, not from
-    /// `list_services().len()` captured before the loop.
+    /// A corrupt row aborts rather than producing a backup that silently omits it.
+    ///
+    /// The error must name the entry and the recovery path, because that is the only
+    /// thing standing between the user and a vault they cannot fully back up.
     #[test]
-    fn a_corrupt_row_is_skipped_and_not_counted_as_exported() {
+    fn a_corrupt_row_aborts_the_export() {
         let conn = scratch_vault();
         db::add_credential(&conn, &TEST_KEY, "good", "ug", "pg", "", "");
         db::add_credential(&conn, &TEST_KEY, "bad", "ub", "pb", "", "");
@@ -365,19 +380,36 @@ mod tests {
         let services = db::list_services(&conn);
         assert_eq!(services.len(), 2, "both rows are still listed");
 
-        let (csv, exported, skipped) = build_gpg_csv(&conn, &TEST_KEY, &services);
+        let err = build_gpg_csv(&conn, &TEST_KEY, &services)
+            .expect_err("a row that will not decrypt must abort the export");
 
-        assert_eq!(exported, 1, "only the readable row reached the CSV");
-        assert_eq!(skipped, 1);
-        assert_ne!(
-            exported,
-            services.len(),
-            "the pre-fix code reported services.len() here, overstating the backup"
-        );
-        assert!(csv.contains("\"good\""));
+        assert!(err.contains("bad"), "the error must name the entry: {err}");
         assert!(
-            !csv.contains("\"bad\""),
-            "the corrupt row must not appear in the backup"
+            err.contains("sk2 verify"),
+            "the error must point at the recovery path: {err}"
         );
+        assert!(
+            err.contains("No backup file was written"),
+            "the user must be told no partial file exists: {err}"
+        );
+    }
+
+    /// The counterpart to the rule above: a *vanished* row is a benign race, not
+    /// corruption, so it warns and skips. There is no data to lose — the credential
+    /// was deleted — and aborting would be friction buying nothing.
+    #[test]
+    fn a_vanished_row_is_skipped_rather_than_aborting() {
+        let conn = scratch_vault();
+        db::add_credential(&conn, &TEST_KEY, "stays", "u", "p", "", "");
+
+        // Name a service that is not in the vault, standing in for a row deleted
+        // between list_services and the read.
+        let services = vec!["stays".to_string(), "deleted_meanwhile".to_string()];
+        let (csv, exported, skipped) = build_gpg_csv(&conn, &TEST_KEY, &services)
+            .expect("a vanished row must not abort the export");
+
+        assert_eq!(exported, 1);
+        assert_eq!(skipped, 1);
+        assert!(csv.contains("\"stays\""));
     }
 }

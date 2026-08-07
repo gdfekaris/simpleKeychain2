@@ -30,6 +30,26 @@ with an error after printing.
   printed before the clipboard is touched, so the failure was purely cosmetic — but the non-zero
   exit broke `set -e` scripts. It now warns that the password was not copied and exits 0.
 
+### Changed
+
+- **A GPG export now aborts if any credential fails to decrypt, instead of skipping it.** This
+  matches the `.sk2backup` format, which has always failed on the first unreadable row. Previously
+  the entry was reported and left out, and the export was reported as a success — the reasoning
+  being that a partial backup beats none. The problem is that the omission is invisible in the
+  artifact: the `.csv.gpg` carries no record of what is missing, so the warning exists only in a
+  terminal you will not have when you come to restore. You are now told which entry failed and
+  pointed at `sk2 verify`; no file is written, so an existing backup at that path is not replaced
+  by an incomplete one. Nothing is lost by failing — the unreadable credential was already
+  unreadable, and the repair path (`sk2 import` from an older backup, or `sk2 delete` and reset the
+  password upstream) is unchanged.
+
+  A credential *deleted* while the export runs is a different case and still just reported and
+  omitted, since there is nothing to lose.
+
+- **The GPG export's success line now reports the number of credentials actually written.** It
+  previously reported the number found before the file was built, which — combined with the
+  skipping described above — could announce more credentials than the backup contained.
+
 ### Security
 
 - **Decrypted credentials are now wiped from memory more thoroughly.** Passwords and notes were
