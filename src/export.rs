@@ -141,7 +141,6 @@ pub(crate) fn export_gpg(
     for service in &services {
         match db::get_credential(conn, key, service) {
             Ok(Some((username, password, notes, url, _))) => {
-                let password = Zeroizing::new(password);
                 csv.push_str(&backup::csv_escape(service));
                 csv.push(',');
                 csv.push_str(&backup::csv_escape(&username));

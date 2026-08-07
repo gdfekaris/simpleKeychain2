@@ -90,7 +90,6 @@ pub(crate) fn export_vault(
     for (service, nonce, ciphertext) in &rows {
         let (username, password, notes, url) = crypto::decrypt(key, service, nonce, ciphertext)
             .map_err(|()| format!("Failed to decrypt credential for '{service}'."))?;
-        let password = Zeroizing::new(password);
         csv.push_str(&csv_escape(service));
         csv.push(',');
         csv.push_str(&csv_escape(&username));
@@ -288,8 +287,8 @@ mod tests {
                 .unwrap()
                 .unwrap_or_else(|| panic!("missing credential for '{svc}'"));
             assert_eq!(&got_u, u, "username mismatch for {svc}");
-            assert_eq!(&got_p, p, "password mismatch for {svc}");
-            assert_eq!(&got_n, n, "notes mismatch for {svc}");
+            assert_eq!(got_p.as_str(), *p, "password mismatch for {svc}");
+            assert_eq!(got_n.as_str(), *n, "notes mismatch for {svc}");
             assert_eq!(&got_url, url, "url mismatch for {svc}");
         }
     }
@@ -377,8 +376,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(u, "new_user");
-        assert_eq!(p, "new_pass");
-        assert_eq!(n, "imported");
+        assert_eq!(p.as_str(), "new_pass");
+        assert_eq!(n.as_str(), "imported");
         assert_eq!(url, "https://github.com");
     }
 
@@ -399,8 +398,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(u, "me");
-        assert_eq!(p, "secret");
-        assert_eq!(n, "keep");
+        assert_eq!(p.as_str(), "secret");
+        assert_eq!(n.as_str(), "keep");
     }
 
     #[test]
@@ -470,7 +469,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(u, "eu");
-        assert_eq!(p, "ep");
+        assert_eq!(p.as_str(), "ep");
     }
 
     /// SK2B import accepts the legacy 3-column header and 3-field rows, not just
@@ -501,8 +500,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(u, "legacy_user");
-        assert_eq!(p, "legacy_pass");
-        assert_eq!(n, "", "notes should default to empty for 3-column rows");
+        assert_eq!(p.as_str(), "legacy_pass");
+        assert_eq!(
+            n.as_str(),
+            "",
+            "notes should default to empty for 3-column rows"
+        );
         assert_eq!(url, "", "url should default to empty for 3-column rows");
     }
 

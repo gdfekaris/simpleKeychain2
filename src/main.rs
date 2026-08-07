@@ -439,7 +439,6 @@ fn run(cli: Cli) -> Result<(), String> {
             let service = resolve_service(&conn, &service)?;
             match db::get_credential(&conn, &key, &service)? {
                 Some((username, password, notes, url, updated_at)) => {
-                    let password = Zeroizing::new(password);
                     if print {
                         // Explicit opt-in to on-screen disclosure (F11). The value goes
                         // to stdout and *nothing else does*, so command substitution
@@ -448,10 +447,18 @@ fn run(cli: Cli) -> Result<(), String> {
                         if !copy_username {
                             ui::print_warning();
                         }
-                        ui::raw_line(if copy_username { &username } else { &password });
+                        ui::raw_line(if copy_username {
+                            username.as_str()
+                        } else {
+                            password.as_str()
+                        });
                         return Ok(());
                     }
-                    let clipboard_text: &str = if copy_username { &username } else { &password };
+                    let clipboard_text: &str = if copy_username {
+                        username.as_str()
+                    } else {
+                        password.as_str()
+                    };
                     let clipboard_label = if copy_username {
                         "Username:"
                     } else {
@@ -611,7 +618,6 @@ fn run(cli: Cli) -> Result<(), String> {
             let (current_username, current_password, current_notes, current_url, _) =
                 db::get_credential(&conn, &key, &service)?
                     .ok_or_else(|| format!("No credential found for '{service}'."))?;
-            let current_password = Zeroizing::new(current_password);
 
             let neither = !edit_username && !edit_password && !edit_notes && !edit_url;
             let prompt_username = edit_username || neither;
@@ -644,13 +650,18 @@ fn run(cli: Cli) -> Result<(), String> {
                 current_password
             };
 
-            let new_notes = if edit_notes {
+            let new_notes: Zeroizing<String> = if edit_notes {
+                // The echoed current value is a copy of the notes, so it is wrapped too
+                // rather than left as a bare String (F4).
                 let display = if current_notes.is_empty() {
-                    "(none)".to_string()
+                    Zeroizing::new("(none)".to_string())
                 } else {
                     current_notes.clone()
                 };
-                let input = vault::plain_prompt(&format!("Notes [{}]: ", display));
+                let input = Zeroizing::new(vault::plain_prompt(&format!(
+                    "Notes [{}]: ",
+                    display.as_str()
+                )));
                 if input.is_empty() {
                     current_notes
                 } else {

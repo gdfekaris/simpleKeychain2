@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use zeroize::Zeroizing;
 
 use crate::constants::*;
 use crate::crypto;
@@ -152,12 +153,26 @@ pub(crate) fn decrypt_failure(service: &str) -> String {
     )
 }
 
+/// Returns `(username, password, notes, url, updated_at)`.
+///
+/// Password and notes arrive already wrapped from `crypto::decrypt` and are handed
+/// on untouched (F4) — callers used to wrap them here, which only protected a copy
+/// that had already been made.
 #[allow(clippy::type_complexity)]
 pub(crate) fn get_credential(
     conn: &Connection,
     key: &[u8; KEY_LEN],
     service: &str,
-) -> Result<Option<(String, String, String, String, Option<i64>)>, String> {
+) -> Result<
+    Option<(
+        String,
+        Zeroizing<String>,
+        Zeroizing<String>,
+        String,
+        Option<i64>,
+    )>,
+    String,
+> {
     let result = conn.query_row(
         "SELECT nonce, ciphertext, updated_at FROM credentials WHERE service = ?1",
         rusqlite::params![service],
@@ -499,8 +514,8 @@ mod tests {
         );
         let (u, p, n, url, ts) = get_credential(&conn, &TEST_KEY, "github").unwrap().unwrap();
         assert_eq!(u, "user");
-        assert_eq!(p, "pass123");
-        assert_eq!(n, "notes");
+        assert_eq!(p.as_str(), "pass123");
+        assert_eq!(n.as_str(), "notes");
         assert_eq!(url, "https://github.com");
         assert!(ts.is_some());
     }
@@ -522,7 +537,7 @@ mod tests {
         add_credential(&conn, &TEST_KEY, "svc", "new_user", "new_pass", "", "");
         let (u, p, _, _, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap().unwrap();
         assert_eq!(u, "new_user");
-        assert_eq!(p, "new_pass");
+        assert_eq!(p.as_str(), "new_pass");
     }
 
     #[test]
@@ -548,8 +563,8 @@ mod tests {
         ));
         let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "svc").unwrap().unwrap();
         assert_eq!(u, "u2");
-        assert_eq!(p, "p2");
-        assert_eq!(n, "notes");
+        assert_eq!(p.as_str(), "p2");
+        assert_eq!(n.as_str(), "notes");
         assert_eq!(url, "url");
     }
 
@@ -604,8 +619,8 @@ mod tests {
         assert!(get_credential(&conn, &TEST_KEY, "old").unwrap().is_none());
         let (u, p, n, url, _) = get_credential(&conn, &TEST_KEY, "new").unwrap().unwrap();
         assert_eq!(u, "u");
-        assert_eq!(p, "p");
-        assert_eq!(n, "n");
+        assert_eq!(p.as_str(), "p");
+        assert_eq!(n.as_str(), "n");
         assert_eq!(url, "url");
     }
 

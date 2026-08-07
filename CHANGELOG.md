@@ -30,6 +30,21 @@ with an error after printing.
   printed before the clipboard is touched, so the failure was purely cosmetic — but the non-zero
   exit broke `set -e` scripts. It now warns that the password was not copied and exits 0.
 
+### Security
+
+- **Decrypted credentials are now wiped from memory more thoroughly.** Passwords and notes were
+  previously copied into ordinary allocations at three points — the JSON buffer inside encryption,
+  the JSON buffer inside decryption, and the values handed back from the database layer — and
+  released to the allocator without being overwritten. All three are now wiped, as is the
+  credential struct itself. Usernames and URLs are unchanged: both are displayed in plaintext by
+  design, so wrapping them would protect nothing.
+
+  This narrows the window rather than closing it, and the documentation says so. A wrapper wipes
+  the allocation it holds at the moment it drops, so it cannot reach a copy left behind when a
+  buffer grew and moved, nor scratch allocations inside third-party parsers. `SECURITY.md` and the
+  README describe the remaining limitation. There is no change to the vault format, the backup
+  format, or any command's behaviour.
+
 ## [1.2.0] — 2026-08-05
 
 The headline item is a data-loss fix in the legacy GPG import path. If you keep multi-line notes and

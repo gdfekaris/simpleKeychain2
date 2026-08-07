@@ -3,7 +3,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::constants::*;
 
@@ -15,6 +15,32 @@ struct Credential {
     notes: Option<String>,
     #[serde(default)]
     url: Option<String>,
+}
+
+/// Wipe every field when the struct dies (F4).
+///
+/// `encrypt` builds a `Credential` out of fresh `String` copies of the caller's
+/// cleartext, and `decrypt` materializes one out of the JSON. Without this, both
+/// copies were released to the allocator unwiped.
+///
+/// Written by hand rather than derived so that `zeroize`'s optional `derive`
+/// feature (and the `zeroize_derive` proc-macro crate behind it) stays out of the
+/// dependency tree for four field wipes.
+///
+/// Consequence to know about: a type with a `Drop` impl cannot have its fields
+/// moved out, so `decrypt` uses `mem::take` to hand each buffer onward. The
+/// allocation travels with the value; what drops here is the emptied husk.
+impl Drop for Credential {
+    fn drop(&mut self) {
+        self.username.zeroize();
+        self.password.zeroize();
+        if let Some(notes) = &mut self.notes {
+            notes.zeroize();
+        }
+        if let Some(url) = &mut self.url {
+            url.zeroize();
+        }
+    }
 }
 
 /// Argon2id cost parameters for a single key derivation.
@@ -248,7 +274,9 @@ pub(crate) fn encrypt(
             Some(url.to_string())
         },
     };
-    let plaintext = serde_json::to_vec(&cred).expect("Failed to serialize credential");
+    // The serialized form holds the password in the clear; wiped on drop (F4).
+    let plaintext =
+        Zeroizing::new(serde_json::to_vec(&cred).expect("Failed to serialize credential"));
 
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce_bytes = [0u8; 24];
@@ -259,7 +287,7 @@ pub(crate) fn encrypt(
         .encrypt(
             nonce,
             Payload {
-                msg: plaintext.as_ref(),
+                msg: plaintext.as_slice(),
                 aad: service.as_bytes(),
             },
         )
@@ -267,31 +295,45 @@ pub(crate) fn encrypt(
     (nonce_bytes.to_vec(), ciphertext)
 }
 
+/// Returns `(username, password, notes, url)`.
+///
+/// Only the two secret fields come back wrapped (F4). The split follows the
+/// classification the rest of sk2 already applies: `add --notes` prompts on the TTY
+/// so recovery codes and security answers stay out of shell history, while `--url`
+/// is an inline argument because URLs are not secret — and `get` prints the username
+/// in plaintext by design. Wrapping the other two would add churn at every call site
+/// while protecting values that are displayed on screen anyway.
 pub(crate) fn decrypt(
     key: &[u8; KEY_LEN],
     service: &str,
     nonce: &[u8],
     ciphertext: &[u8],
-) -> Result<(String, String, String, String), ()> {
+) -> Result<(String, Zeroizing<String>, Zeroizing<String>, String), ()> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
     let nonce = XNonce::from_slice(nonce);
 
-    let plaintext = cipher
-        .decrypt(
-            nonce,
-            Payload {
-                msg: ciphertext,
-                aad: service.as_bytes(),
-            },
-        )
-        .map_err(|_| ())?;
+    // Holds the credential JSON in the clear; wiped on drop (F4).
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad: service.as_bytes(),
+                },
+            )
+            .map_err(|_| ())?,
+    );
 
-    let cred: Credential = serde_json::from_slice(&plaintext).map_err(|_| ())?;
+    // `mem::take`/`Option::take` rather than field moves: `Credential` has a `Drop`
+    // impl, so it cannot be destructured. Each buffer moves out intact and the
+    // emptied struct wipes nothing on the way down.
+    let mut cred: Credential = serde_json::from_slice(plaintext.as_slice()).map_err(|_| ())?;
     Ok((
-        cred.username,
-        cred.password,
-        cred.notes.unwrap_or_default(),
-        cred.url.unwrap_or_default(),
+        std::mem::take(&mut cred.username),
+        Zeroizing::new(std::mem::take(&mut cred.password)),
+        Zeroizing::new(cred.notes.take().unwrap_or_default()),
+        cred.url.take().unwrap_or_default(),
     ))
 }
 
@@ -466,8 +508,8 @@ mod tests {
         );
         let (u, p, n, url) = decrypt(&TEST_KEY, "github", &nonce, &ct).unwrap();
         assert_eq!(u, "user");
-        assert_eq!(p, "pass");
-        assert_eq!(n, "my notes");
+        assert_eq!(p.as_str(), "pass");
+        assert_eq!(n.as_str(), "my notes");
         assert_eq!(url, "https://github.com");
     }
 
@@ -476,8 +518,8 @@ mod tests {
         let (nonce, ct) = encrypt(&TEST_KEY, "svc", "user", "pass", "", "");
         let (u, p, n, url) = decrypt(&TEST_KEY, "svc", &nonce, &ct).unwrap();
         assert_eq!(u, "user");
-        assert_eq!(p, "pass");
-        assert_eq!(n, "");
+        assert_eq!(p.as_str(), "pass");
+        assert_eq!(n.as_str(), "");
         assert_eq!(url, "");
     }
 
@@ -485,6 +527,27 @@ mod tests {
     fn aad_wrong_service() {
         let (nonce, ct) = encrypt(&TEST_KEY, "github", "user", "pass", "", "");
         assert!(decrypt(&TEST_KEY, "gitlab", &nonce, &ct).is_err());
+    }
+
+    /// F4 pin: the two secret fields come back wrapped.
+    ///
+    /// Be clear about what this does and does not prove. Whether a buffer was
+    /// actually overwritten is not observable from safe Rust — reading freed memory
+    /// to check would be undefined behaviour, and the optimizer is free to reorder
+    /// around a wipe it can prove is unobservable. So this pins the *type*, which is
+    /// what carries the guarantee: if `password` or `notes` ever regresses to a bare
+    /// `String`, these annotations stop compiling.
+    ///
+    /// `username` and `url` are deliberately unwrapped — see the note on `decrypt`.
+    #[test]
+    fn decrypt_returns_the_secret_fields_wrapped() {
+        let (nonce, ct) = encrypt(&TEST_KEY, "svc", "user", "pass", "notes", "https://x");
+        let (username, password, notes, url) = decrypt(&TEST_KEY, "svc", &nonce, &ct).unwrap();
+
+        let _: &Zeroizing<String> = &password;
+        let _: &Zeroizing<String> = &notes;
+        let _: &String = &username;
+        let _: &String = &url;
     }
 
     #[test]
@@ -623,8 +686,8 @@ mod tests {
         );
         let (u, p, n, url) = decrypt(&TEST_KEY, "日本語", &nonce, &ct).unwrap();
         assert_eq!(u, "用户名");
-        assert_eq!(p, "密码🔑");
-        assert_eq!(n, "笔记📝");
+        assert_eq!(p.as_str(), "密码🔑");
+        assert_eq!(n.as_str(), "笔记📝");
         assert_eq!(url, "https://例え.jp");
     }
 }

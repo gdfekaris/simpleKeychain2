@@ -86,9 +86,12 @@ These are deliberate trade-offs or accepted gaps, documented so you can judge th
 - **Windows has no equivalent file-permission hardening.** The `umask` and `0600` modes described
   above are Unix-only. On Windows, the vault and backup files inherit default ACLs.
 - **In-memory secret handling is best-effort.** Secrets are held in wrappers that wipe on drop,
-  including on error paths and panics. However, some intermediate buffers — notably the JSON
-  serialization used inside encryption and decryption — are ordinary allocations that are not wiped.
-  A memory dump, a swap file, or a hibernation image could therefore still contain plaintext.
+  including on error paths and panics. That now covers the credential struct and the JSON buffers
+  used inside encryption and decryption, which were previously left unwiped. It is still not a
+  guarantee: a wrapper wipes only the allocation it holds at the moment it drops, so it cannot
+  reach a copy left behind when a buffer grew and moved, nor scratch allocations inside
+  third-party parsers. A memory dump, a swap file, or a hibernation image could therefore still
+  contain plaintext.
 - **Clipboard contents are cleared unconditionally after 10 seconds,** not selectively. Whatever is
   on the clipboard at that moment is wiped, including something you copied yourself in the interim.
   Clipboard managers may also retain history that sk2 cannot reach.
