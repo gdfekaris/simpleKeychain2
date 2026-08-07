@@ -87,6 +87,9 @@ pub(crate) fn export_sk2b(
     file.sync_all()
         .map_err(|e| format!("Failed to flush backup to disk: {e}"))?;
 
+    // `services.len()` is the true count here, unlike on the GPG path:
+    // `backup::export_vault` returns `Err` on the first row that will not decrypt
+    // rather than skipping it, so reaching this line means every row is in the blob.
     let count = services.len();
     println!();
     ui::success(&format!("Exported {count} credential(s) to: {output}"));
@@ -96,6 +99,60 @@ pub(crate) fn export_sk2b(
     ui::reminder("REMINDER: Delete this file once you no longer need it.");
 
     Ok(())
+}
+
+/// Build the GPG export CSV. Returns it with the number of rows actually written
+/// and the number skipped.
+///
+/// Split out of `export_gpg` so the counts are testable. The success line used to
+/// report `services.len()`, captured before the loop — but the loop skips rows that
+/// vanished or will not decrypt, so a vault with an unreadable entry announced more
+/// credentials than the file contained. Per-row warnings were printed either way;
+/// the summary contradicted them.
+///
+/// The CSV holds every credential in plaintext, so it stays inside `Zeroizing` and
+/// is returned by move. There is deliberately no unwrapped intermediate here — see
+/// F4 in `project-assessment.md`.
+fn build_gpg_csv(
+    conn: &Connection,
+    key: &[u8; KEY_LEN],
+    services: &[String],
+) -> (Zeroizing<String>, usize, usize) {
+    let mut csv = Zeroizing::new(String::from("name,username,password,notes,url\n"));
+    let mut exported = 0usize;
+    let mut skipped = 0usize;
+
+    for service in services {
+        match db::get_credential(conn, key, service) {
+            Ok(Some((username, password, notes, url, _))) => {
+                csv.push_str(&backup::csv_escape(service));
+                csv.push(',');
+                csv.push_str(&backup::csv_escape(&username));
+                csv.push(',');
+                csv.push_str(&backup::csv_escape(&password));
+                csv.push(',');
+                csv.push_str(&backup::csv_escape(&notes));
+                csv.push(',');
+                csv.push_str(&backup::csv_escape(&url));
+                csv.push('\n');
+                exported += 1;
+            }
+            Ok(None) => {
+                // Raced with a delete between list_services and now.
+                ui::warning(&format!("Credential for '{service}' vanished, skipping."));
+                skipped += 1;
+            }
+            Err(e) => {
+                // Corrupt row. Skip it rather than aborting the export -- a partial
+                // backup of the readable entries is more useful than none, and the
+                // message says exactly which entry was lost.
+                ui::warning(&format!("{e} Skipping it in this export."));
+                skipped += 1;
+            }
+        }
+    }
+
+    (csv, exported, skipped)
 }
 
 pub(crate) fn export_gpg(
@@ -137,33 +194,7 @@ pub(crate) fn export_gpg(
         return Err("Export cancelled.".into());
     }
 
-    let mut csv = Zeroizing::new(String::from("name,username,password,notes,url\n"));
-    for service in &services {
-        match db::get_credential(conn, key, service) {
-            Ok(Some((username, password, notes, url, _))) => {
-                csv.push_str(&backup::csv_escape(service));
-                csv.push(',');
-                csv.push_str(&backup::csv_escape(&username));
-                csv.push(',');
-                csv.push_str(&backup::csv_escape(&password));
-                csv.push(',');
-                csv.push_str(&backup::csv_escape(&notes));
-                csv.push(',');
-                csv.push_str(&backup::csv_escape(&url));
-                csv.push('\n');
-            }
-            Ok(None) => {
-                // Raced with a delete between list_services and now.
-                ui::warning(&format!("Credential for '{service}' vanished, skipping."));
-            }
-            Err(e) => {
-                // Corrupt row. Skip it rather than aborting the export -- a partial
-                // backup of the readable entries is more useful than none, and the
-                // message says exactly which entry was lost.
-                ui::warning(&format!("{e} Skipping it in this export."));
-            }
-        }
-    }
+    let (csv, exported, skipped) = build_gpg_csv(conn, key, &services);
 
     // Open our own output file (H7 fix: do not let gpg --output create the file).
     let mut file = open_output(output, overwrite)?;
@@ -212,9 +243,13 @@ pub(crate) fn export_gpg(
     file.sync_all()
         .map_err(|e| format!("Failed to flush GPG output to disk: {e}"))?;
 
-    let count = services.len();
     println!();
-    ui::success(&format!("Exported {count} credential(s) to: {output}"));
+    ui::success(&format!("Exported {exported} credential(s) to: {output}"));
+    if skipped > 0 {
+        ui::warning(&format!(
+            "{skipped} credential(s) could not be read and are NOT in this backup (see above)."
+        ));
+    }
     ui::muted("Format: GPG symmetric (legacy, weaker KDF). Permissions: 0600.");
     println!();
     ui::info("To decrypt", &format!("gpg -d {output}"));
@@ -283,5 +318,66 @@ mod tests {
             "header + one credential, not one per line"
         );
         assert_eq!(records[1], fields, "every field round-trips intact");
+    }
+
+    // -- build_gpg_csv counts --
+
+    const TEST_KEY: [u8; KEY_LEN] = [7u8; KEY_LEN];
+
+    fn scratch_vault() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        db::init_db(&conn);
+        conn
+    }
+
+    #[test]
+    fn every_readable_row_is_counted_and_written() {
+        let conn = scratch_vault();
+        db::add_credential(&conn, &TEST_KEY, "a", "ua", "pa", "", "");
+        db::add_credential(&conn, &TEST_KEY, "b", "ub", "pb", "", "");
+
+        let services = db::list_services(&conn);
+        let (csv, exported, skipped) = build_gpg_csv(&conn, &TEST_KEY, &services);
+
+        assert_eq!(exported, 2);
+        assert_eq!(skipped, 0);
+        assert_eq!(
+            csv.lines().count(),
+            3,
+            "header plus one line per credential"
+        );
+    }
+
+    /// The bug this function was extracted for: an unreadable row is skipped, so the
+    /// count reported to the user must come from rows actually written, not from
+    /// `list_services().len()` captured before the loop.
+    #[test]
+    fn a_corrupt_row_is_skipped_and_not_counted_as_exported() {
+        let conn = scratch_vault();
+        db::add_credential(&conn, &TEST_KEY, "good", "ug", "pg", "", "");
+        db::add_credential(&conn, &TEST_KEY, "bad", "ub", "pb", "", "");
+        conn.execute(
+            "UPDATE credentials SET ciphertext = X'0001020304' WHERE service = 'bad'",
+            [],
+        )
+        .unwrap();
+
+        let services = db::list_services(&conn);
+        assert_eq!(services.len(), 2, "both rows are still listed");
+
+        let (csv, exported, skipped) = build_gpg_csv(&conn, &TEST_KEY, &services);
+
+        assert_eq!(exported, 1, "only the readable row reached the CSV");
+        assert_eq!(skipped, 1);
+        assert_ne!(
+            exported,
+            services.len(),
+            "the pre-fix code reported services.len() here, overstating the backup"
+        );
+        assert!(csv.contains("\"good\""));
+        assert!(
+            !csv.contains("\"bad\""),
+            "the corrupt row must not appear in the backup"
+        );
     }
 }

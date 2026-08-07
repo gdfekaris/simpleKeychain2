@@ -10,10 +10,13 @@
 //!
 //! Two things deliberately avoided:
 //!
-//! * **`get` is not asserted on.** It copies to the clipboard before printing
-//!   anything, and `arboard` fails on a headless runner — so a `get` assertion
-//!   would fail in CI for reasons unrelated to sk2. `verify` proves the same
-//!   decryption path without touching the clipboard.
+//! * **`get`'s clipboard path is not asserted on.** It copies to the clipboard
+//!   before printing anything, and `arboard` fails on a headless runner — so that
+//!   assertion would fail in CI for reasons unrelated to sk2. `verify` proves the
+//!   same decryption path without touching the clipboard. `get --print` is a
+//!   different matter: it skips the clipboard entirely, so it *is* asserted
+//!   directly (`get_print_displays_the_password`). Since F11 that is the one `get`
+//!   invocation this suite can drive end to end.
 //! * **The vault path is passed as `--vault`, never `SK2_VAULT`.** Setting an
 //!   environment variable in a forked child means allocating after `fork()` in a
 //!   multi-threaded process, which can deadlock. Building argv before forking
