@@ -115,10 +115,13 @@ credential it could not read.
 
 ### Internal
 
-- Test suite grew from 119 to 123, covering the memory-wiping types, the export counts, and the
+- Test suite grew from 119 to 126, covering the memory-wiping types, the export counts, and the
   new abort-on-corrupt-row behaviour along with its deliberate exception for a credential deleted
   mid-export. The GPG export's CSV construction moved into a testable helper; previously that path
-  could only be exercised by running `gpg` against a real terminal.
+  could only be exercised by running `gpg` against a real terminal. Three of the new tests are
+  end-to-end and pin shell completion's non-negotiables: that it emits a script for every shell,
+  that it lists service names without prompting, and that pressing Tab on a machine with no vault
+  creates nothing on disk.
 
 ## [1.2.0] — 2026-08-05
 
