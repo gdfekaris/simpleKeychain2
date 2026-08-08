@@ -9,6 +9,32 @@ backup compatibility — not to a Rust API.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The bash completion install instructions pointed at a directory nothing reads, so Tab completed
+  filenames instead of service names.** `README.md` and the header of `completions/sk2.bash` both
+  gave `~/.bash_completion.d/sk2` as the first of two options. bash-completion does not source that
+  directory — it loads `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/`,
+  `/etc/bash_completion.d/`, and the single *file* `~/.bash_completion`. A script left in
+  `~/.bash_completion.d/` is read by nobody, leaving `sk2` on bash-completion's `_minimal` fallback,
+  which offers filenames. Following the documented instructions exactly produced a shell that looked
+  like completion had simply never been implemented.
+
+  Both now give `~/.local/share/bash-completion/completions/sk2`, and say that the
+  `source <(sk2 completions bash)` alternative needs no bash-completion package at all. The README
+  additionally tells anyone who installed under the old instructions where their file went and what
+  to do about it. The fish line gained the `mkdir -p` it needed for a config directory that may not
+  exist yet. **The scripts themselves were correct and are unchanged** — only where users were told
+  to put them.
+
+- **`completions/verify` now checks the install path, not just the completion function.** Every
+  assertion in `bash-check.sh` ran after `source <(sk2 completions bash)`, which proves `_sk2`
+  behaves and says nothing about whether following `README.md` registers it. That is how the bug
+  above shipped behind 35 green assertions. A new check copies the script to the documented location
+  under a scratch `HOME` and requires a fresh `bash --norc` to report `complete -F _sk2 sk2`; against
+  the old path it reports `complete -F _minimal sk2` and fails. Same lesson as the
+  `gh attestation verify` defect found before the 1.3.0 release, in a different place.
+
 ### Documentation
 
 - **`SECURITY.md` now says that attestation verification requires a GitHub account.** It previously

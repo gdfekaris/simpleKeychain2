@@ -42,6 +42,30 @@ Every rule in `shell-completion-spec.md`, for each shell:
 That last one is the fixture's whole reason for including an awkward name, and it is the case each
 shell is most likely to get wrong on insertion.
 
+Plus, for bash only, the thing all of the above assumes:
+
+- **that the documented install path actually registers the completion.** The script is copied to
+  `~/.local/share/bash-completion/completions/sk2` under a scratch `HOME`, exactly as `README.md`
+  instructs, and a fresh `bash --norc` that sources only bash-completion must then report
+  `complete -F _sk2 sk2`.
+
+### Why that last check exists
+
+Every other assertion here runs after `source <(sk2 completions bash)` at the top of the checker.
+That proves `_sk2` is correct. It cannot prove a user ends up with `_sk2` registered, because no user
+was told to run that command as the primary route — and the two are separate claims.
+
+They came apart in 1.3.0. The documented location was `~/.bash_completion.d/`, which bash-completion
+**does not read** (it loads the XDG directory above, `/etc/bash_completion.d/`, and the single file
+`~/.bash_completion`). A user following the instructions exactly got `complete -F _minimal sk2` —
+filename completion — while 35 assertions here reported everything green. Nothing was wrong with the
+script; the instructions pointed at a directory nothing sources.
+
+This is the same failure mode as the `gh attestation verify` defect found while verifying the 1.3.0
+release: **instructions have to be walked the way the audience walks them, not the way the author
+already has their machine set up.** A checker that skips the install step is testing the half that
+was never in doubt.
+
 ### Why each checker starts with a positive control
 
 Three of the assertions expect a completion to offer **nothing**. A harness that is itself broken

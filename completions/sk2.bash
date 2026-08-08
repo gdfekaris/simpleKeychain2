@@ -1,8 +1,17 @@
 # bash completion for sk2
 #
-# Install:  sk2 completions bash > ~/.bash_completion.d/sk2
-#      or:  sk2 completions bash > /etc/bash_completion.d/sk2   (system-wide)
+# Install:  mkdir -p ~/.local/share/bash-completion/completions
+#           sk2 completions bash > ~/.local/share/bash-completion/completions/sk2
+#      or:  sk2 completions bash > /etc/bash_completion.d/sk2   (system-wide, needs root)
 #      or:  echo 'source <(sk2 completions bash)' >> ~/.bashrc
+#
+# The first two need the bash-completion package; the third does not, since this
+# script uses only bash builtins.
+#
+# NOT ~/.bash_completion.d/ -- despite being widely repeated, bash-completion
+# reads no such directory. It loads the XDG path above, /etc/bash_completion.d,
+# and the single file ~/.bash_completion. A script left in ~/.bash_completion.d/
+# is sourced by nothing and Tab silently falls back to filenames.
 #
 # Service names come from `sk2 --list-services`, which reads only the plaintext
 # service column and never prompts for a master password.
