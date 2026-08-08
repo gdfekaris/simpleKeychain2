@@ -295,6 +295,23 @@ pub(crate) fn list_services(conn: &Connection) -> Vec<String> {
         .collect()
 }
 
+/// `list_services` with every failure turned into an empty result.
+///
+/// Backs the hidden `--list-services` flag, which fires on every Tab press. The
+/// normal version panics on a database error, and a panic message would land in the
+/// middle of the user's half-typed command line. Silence is the only acceptable
+/// failure mode here, so a missing `credentials` table, a locked database, or an
+/// unreadable row all yield nothing rather than noise.
+pub(crate) fn list_services_quiet(conn: &Connection) -> Vec<String> {
+    let Ok(mut stmt) = conn.prepare("SELECT service FROM credentials ORDER BY service") else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
 pub(crate) fn list_services_with_timestamps(conn: &Connection) -> Vec<(String, Option<i64>)> {
     let mut stmt = conn
         .prepare("SELECT service, updated_at FROM credentials ORDER BY service")

@@ -70,6 +70,57 @@ fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
     path
 }
 
+/// Resolve the vault path *without* touching the filesystem.
+///
+/// `vault_path` is not usable for shell completion: it calls `ensure_dir`, so a Tab
+/// press would create `~/.sk2`, and it `.expect()`s when there is no home directory.
+/// Completion must observe the vault, never bring it into being — see
+/// `list_services_for_completion`.
+fn vault_path_readonly(cli_override: Option<&str>) -> Option<std::path::PathBuf> {
+    if let Some(p) = cli_override {
+        return Some(std::path::PathBuf::from(p));
+    }
+    if let Ok(p) = std::env::var("SK2_VAULT") {
+        return Some(std::path::PathBuf::from(p));
+    }
+    Some(dirs::home_dir()?.join(".sk2").join("vault.db"))
+}
+
+/// Print one stored service name per line, then exit. Backs shell completion.
+///
+/// Service names are stored in plaintext by design, so this needs no master
+/// password and reveals nothing a shell user could not already get by reading
+/// `~/.sk2/vault.db` — which is `0600`, i.e. already theirs. It exposes no
+/// usernames, passwords, notes, or URLs.
+///
+/// Three rules, each a trap the obvious implementation falls into:
+///
+/// * **Never prompt.** It runs on every Tab press.
+/// * **Never create anything.** `Connection::open` creates the database file if it
+///   is missing, so using it here would silently conjure an empty `vault.db` the
+///   first time someone pressed Tab with no vault. Opened `SQLITE_OPEN_READ_ONLY`,
+///   which fails on a missing file instead, and the path is resolved through
+///   `vault_path_readonly` so no directory is created either.
+/// * **Never write to stderr.** Any output lands in the middle of a half-typed
+///   command line. Every failure — no home directory, no vault, unreadable file,
+///   missing table — is a silent exit 0.
+fn list_services_for_completion(cli_override: Option<&str>) -> process::ExitCode {
+    let Some(path) = vault_path_readonly(cli_override) else {
+        return process::ExitCode::SUCCESS;
+    };
+    if !path.is_file() {
+        return process::ExitCode::SUCCESS;
+    }
+    let Ok(conn) = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return process::ExitCode::SUCCESS;
+    };
+    for service in db::list_services_quiet(&conn) {
+        println!("{service}");
+    }
+    process::ExitCode::SUCCESS
+}
+
 #[derive(Parser)]
 #[command(name = "sk2", about = "A local-only CLI password manager", styles = STYLES)]
 struct Cli {
@@ -83,6 +134,10 @@ struct Cli {
     /// Internal: clear clipboard after N seconds (used by spawned child)
     #[arg(long = "clear-clipboard", hide = true)]
     clear_clipboard: Option<u64>,
+
+    /// Internal: print stored service names, one per line (used by shell completion)
+    #[arg(long = "list-services", hide = true)]
+    list_services: bool,
 }
 
 #[derive(Subcommand)]
@@ -163,6 +218,13 @@ enum Command {
         /// The new service name
         new_service: String,
     },
+    /// Print a shell completion script (see --help for installation)
+    ///
+    /// Example: sk2 completions bash > ~/.bash_completion.d/sk2
+    Completions {
+        /// Which shell to emit a script for
+        shell: CompletionShell,
+    },
     /// Generate a random password without storing it
     Generate {
         /// Length of the generated password (default: 16, range: 4–64)
@@ -195,6 +257,31 @@ enum Command {
         /// Path to the backup file (.sk2backup or .csv.gpg)
         file: String,
     },
+}
+
+#[cfg_attr(test, derive(Debug))]
+#[derive(Copy, Clone, clap::ValueEnum)]
+enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+    /// PowerShell — Windows is a supported platform, so this is not optional
+    #[value(name = "powershell")]
+    PowerShell,
+}
+
+/// The completion scripts ship inside the binary rather than as files alongside it.
+///
+/// A released sk2 is a single binary users drop on their PATH; anything on disk
+/// beside it would not survive that. `sk2 completions <shell> > <path>` is the whole
+/// installation story, and the scripts cannot drift from the binary that emits them.
+fn completion_script(shell: CompletionShell) -> &'static str {
+    match shell {
+        CompletionShell::Bash => include_str!("../completions/sk2.bash"),
+        CompletionShell::Zsh => include_str!("../completions/sk2.zsh"),
+        CompletionShell::Fish => include_str!("../completions/sk2.fish"),
+        CompletionShell::PowerShell => include_str!("../completions/sk2.ps1"),
+    }
 }
 
 #[cfg(feature = "export")]
@@ -374,12 +461,19 @@ fn run(cli: Cli) -> Result<(), String> {
         return handle_generate(length, charset);
     }
 
+    // Same for completions: emitting a script must work with no vault initialized,
+    // and must not create one as a side effect of being asked.
+    if let Command::Completions { shell } = command {
+        print!("{}", completion_script(shell));
+        return Ok(());
+    }
+
     let db_path = vault_path(vault_arg.as_deref());
     let conn = Connection::open(&db_path).expect("Failed to open database");
     db::init_db(&conn);
 
     match command {
-        Command::Generate { .. } => unreachable!(),
+        Command::Generate { .. } | Command::Completions { .. } => unreachable!(),
         Command::Init => {
             vault::init_vault(&conn)?;
         }
@@ -792,6 +886,12 @@ fn main() -> process::ExitCode {
         .get_matches();
 
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+
+    // Hidden mode: print service names for shell completion, then exit. Before the
+    // clipboard branch and before run(), so it never reaches vault_path().
+    if cli.list_services {
+        return list_services_for_completion(cli.vault.as_deref());
+    }
 
     // Hidden mode: clear clipboard after a delay, then exit.
     if let Some(seconds) = cli.clear_clipboard {

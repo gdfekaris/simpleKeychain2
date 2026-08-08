@@ -294,6 +294,33 @@ SK2_VAULT=~/vaults/work.db sk2 list
 
 This is useful for maintaining separate vaults (work vs. personal), scripting, or non-standard home directory setups. Parent directories are created automatically.
 
+### Shell completion
+
+sk2 can complete subcommands, flags, and **stored service names** on Tab. `sk2 completions <shell>` prints the script; where you put it depends on the shell.
+
+```bash
+# bash — either of these
+mkdir -p ~/.bash_completion.d && sk2 completions bash > ~/.bash_completion.d/sk2
+echo 'source <(sk2 completions bash)' >> ~/.bashrc
+
+# zsh — a directory on your $fpath, with the leading underscore in the filename
+mkdir -p ~/.zsh/completions && sk2 completions zsh > ~/.zsh/completions/_sk2
+# then in ~/.zshrc, BEFORE compinit:
+#   fpath=(~/.zsh/completions $fpath)
+
+# fish
+sk2 completions fish > ~/.config/fish/completions/sk2.fish
+
+# PowerShell
+sk2 completions powershell >> $PROFILE
+```
+
+Start a new shell afterwards (or `. $PROFILE` on PowerShell). Service names are completed for `get`, `delete`, `edit`, and `rename`'s *first* argument. They are deliberately **not** completed for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are names you are coining rather than choosing, and `list` takes a substring filter, so offering exact names would imply the filter has to match one.
+
+**No master password is involved.** Completion calls a hidden `sk2 --list-services`, which reads only the service-name column — the one field sk2 stores in plaintext by design, so that lookups work without decrypting anything. It never prompts, never prints usernames or secrets, and exits silently if there is no vault. It also never *creates* anything: pressing Tab on a machine with no vault leaves the disk untouched.
+
+If the vault lives somewhere non-standard, completion honours `SK2_VAULT`, so exporting it in your shell profile is enough.
+
 ## Creating Backups
 
 sk2 can export all your credentials into an encrypted backup file. Two formats are supported:

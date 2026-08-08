@@ -452,6 +452,93 @@ fn generate_needs_no_vault() {
     );
 }
 
+/// The hidden flag behind shell completion. It fires on every Tab press, so all
+/// three of its rules are asserted here: no prompt, no output but the names, and
+/// no side effects on the filesystem.
+#[test]
+fn list_services_backs_shell_completion() {
+    let s = Scratch::new("listservices");
+    let v = s.vault();
+
+    init_vault(&v);
+    add(&v, "github", "octocat", "gh-pass-123");
+    add(&v, "gmail", "me@example.com", "gm@il!pw");
+
+    let out = sk2(&["--vault", &v, "--list-services"]).finish();
+    out.assert_ok()
+        .assert_says("github")
+        .assert_says("gmail")
+        // The whole point: usable without unlocking the vault.
+        .assert_silent_about("Master password")
+        // Only names. A completion menu must not show usernames or secrets.
+        .assert_silent_about("octocat")
+        .assert_silent_about("gh-pass-123");
+
+    // One name per line and nothing else — the completion scripts split on \n.
+    let lines: Vec<&str> = out
+        .text
+        .lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(
+        lines,
+        vec!["github", "gmail"],
+        "expected exactly the service names, sorted, one per line"
+    );
+}
+
+/// A Tab press on a machine with no vault must stay silent *and* leave the disk
+/// alone. `Connection::open` would have created the database file, so without the
+/// read-only open this would quietly conjure a vault the first time anyone pressed
+/// Tab.
+#[test]
+fn list_services_creates_nothing_when_there_is_no_vault() {
+    let s = Scratch::new("listservices-novault");
+    let missing = s.path("does-not-exist.db");
+
+    sk2(&["--vault", &missing, "--list-services"])
+        .finish()
+        .assert_ok()
+        .assert_silent_about("Master password")
+        .assert_silent_about("error");
+
+    assert!(
+        !Path::new(&missing).exists(),
+        "completion must never create a vault"
+    );
+}
+
+/// `completions <shell>` emits a script for every shell the spec promises, without
+/// a vault and without a master password.
+#[test]
+fn completion_scripts_are_emitted_for_every_shell() {
+    let s = Scratch::new("completions");
+    let missing = s.path("does-not-exist.db");
+
+    for (shell, needle) in [
+        ("bash", "complete -F _sk2 sk2"),
+        ("zsh", "#compdef sk2"),
+        ("fish", "complete -c sk2"),
+        ("powershell", "Register-ArgumentCompleter"),
+    ] {
+        sk2(&["--vault", &missing, "completions", shell])
+            .finish()
+            .assert_ok()
+            .assert_says(needle)
+            .assert_says("--list-services")
+            // The prompt text, with its colon, rather than the bare phrase: every
+            // script's header comment says it "never prompts for a master
+            // password", which would match a looser check.
+            .assert_silent_about("Master password:");
+    }
+
+    assert!(
+        !Path::new(&missing).exists(),
+        "emitting a completion script must not create a vault"
+    );
+}
+
 /// F11: `get --print` writes the bare secret to stdout with a warning on stderr and
 /// skips the clipboard entirely. Skipping the clipboard is also what makes `get`
 /// assertable in this suite at all — the clipboard path fails on a headless runner,

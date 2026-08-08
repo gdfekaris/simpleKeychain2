@@ -28,6 +28,18 @@ credential it could not read.
 
 ### Added
 
+- **Shell completion for bash, zsh, fish and PowerShell**, including Tab-completion of stored
+  service names. `sk2 completions <shell>` prints the script; the README has the one-liner for each
+  shell. Names are completed for `get`, `delete`, `edit` and `rename`'s first argument, and
+  deliberately not for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are
+  names you are coining rather than choosing, and `list` takes a substring filter.
+
+  No master password is involved: completion reads only the service-name column, which sk2 stores
+  in plaintext by design so that lookups work without decrypting anything. It never prompts, prints
+  no usernames or secrets, stays silent when there is no vault, and creates nothing — pressing Tab
+  on a machine with no vault leaves the disk untouched. `SK2_VAULT` is honoured, so a non-standard
+  vault location still completes.
+
 - **`get --print`** displays the password instead of copying it, as an explicit opt-in. The bare
   value is written to stdout with nothing else, so `PASS=$(sk2 get github --print)` captures
   exactly the secret; a warning goes to stderr, and the clipboard is skipped entirely. Combined
