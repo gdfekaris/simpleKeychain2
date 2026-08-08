@@ -455,6 +455,7 @@ fn generate_needs_no_vault() {
 /// The hidden flag behind shell completion. It fires on every Tab press, so all
 /// three of its rules are asserted here: no prompt, no output but the names, and
 /// no side effects on the filesystem.
+#[cfg(feature = "completion")]
 #[test]
 fn list_services_backs_shell_completion() {
     let s = Scratch::new("listservices");
@@ -492,6 +493,7 @@ fn list_services_backs_shell_completion() {
 /// alone. `Connection::open` would have created the database file, so without the
 /// read-only open this would quietly conjure a vault the first time anyone pressed
 /// Tab.
+#[cfg(feature = "completion")]
 #[test]
 fn list_services_creates_nothing_when_there_is_no_vault() {
     let s = Scratch::new("listservices-novault");
@@ -511,6 +513,7 @@ fn list_services_creates_nothing_when_there_is_no_vault() {
 
 /// `completions <shell>` emits a script for every shell the spec promises, without
 /// a vault and without a master password.
+#[cfg(feature = "completion")]
 #[test]
 fn completion_scripts_are_emitted_for_every_shell() {
     let s = Scratch::new("completions");

@@ -10,9 +10,14 @@ license = "MIT"
 repository = "https://github.com/gdfekaris/simpleKeychain2"
 
 [features]
-default = ["export", "import"]
+default = ["export", "import", "completion"]
 export = []
 import = []
+# Shell completion. Gates the `completions` subcommand and the hidden
+# `--list-services` flag behind it. Optional because it is the one path that
+# reveals service names without a master password: `list` prompts, Tab does not.
+# Building without it removes that surface from the binary entirely.
+completion = []
 
 [dependencies]
 arboard = "3"

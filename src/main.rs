@@ -76,6 +76,7 @@ fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
 /// press would create `~/.sk2`, and it `.expect()`s when there is no home directory.
 /// Completion must observe the vault, never bring it into being — see
 /// `list_services_for_completion`.
+#[cfg(feature = "completion")]
 fn vault_path_readonly(cli_override: Option<&str>) -> Option<std::path::PathBuf> {
     if let Some(p) = cli_override {
         return Some(std::path::PathBuf::from(p));
@@ -88,10 +89,15 @@ fn vault_path_readonly(cli_override: Option<&str>) -> Option<std::path::PathBuf>
 
 /// Print one stored service name per line, then exit. Backs shell completion.
 ///
-/// Service names are stored in plaintext by design, so this needs no master
-/// password and reveals nothing a shell user could not already get by reading
-/// `~/.sk2/vault.db` — which is `0600`, i.e. already theirs. It exposes no
-/// usernames, passwords, notes, or URLs.
+/// **This is the one path that reveals service names without a master password**,
+/// and that is a deliberate, gated exception rather than an oversight. `list`
+/// prompts; Tab cannot. It grants no capability the caller lacked — anyone who can
+/// run this can read the `0600` vault file directly — but it does change *exposure*:
+/// service names render on screen, unauthenticated, in front of whoever is watching
+/// or whoever is sitting at an unattended terminal. Service names reveal which
+/// institutions the user holds accounts with (`red-team-tasks.md` RT-10). Hence the
+/// `completion` feature: a build without it has none of this. No usernames,
+/// passwords, notes, or URLs are exposed either way.
 ///
 /// Three rules, each a trap the obvious implementation falls into:
 ///
@@ -104,6 +110,7 @@ fn vault_path_readonly(cli_override: Option<&str>) -> Option<std::path::PathBuf>
 /// * **Never write to stderr.** Any output lands in the middle of a half-typed
 ///   command line. Every failure — no home directory, no vault, unreadable file,
 ///   missing table — is a silent exit 0.
+#[cfg(feature = "completion")]
 fn list_services_for_completion(cli_override: Option<&str>) -> process::ExitCode {
     let Some(path) = vault_path_readonly(cli_override) else {
         return process::ExitCode::SUCCESS;
@@ -136,6 +143,7 @@ struct Cli {
     clear_clipboard: Option<u64>,
 
     /// Internal: print stored service names, one per line (used by shell completion)
+    #[cfg(feature = "completion")]
     #[arg(long = "list-services", hide = true)]
     list_services: bool,
 }
@@ -221,6 +229,7 @@ enum Command {
     /// Print a shell completion script (see --help for installation)
     ///
     /// Example: sk2 completions bash > ~/.bash_completion.d/sk2
+    #[cfg(feature = "completion")]
     Completions {
         /// Which shell to emit a script for
         shell: CompletionShell,
@@ -259,6 +268,7 @@ enum Command {
     },
 }
 
+#[cfg(feature = "completion")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Copy, Clone, clap::ValueEnum)]
 enum CompletionShell {
@@ -275,6 +285,7 @@ enum CompletionShell {
 /// A released sk2 is a single binary users drop on their PATH; anything on disk
 /// beside it would not survive that. `sk2 completions <shell> > <path>` is the whole
 /// installation story, and the scripts cannot drift from the binary that emits them.
+#[cfg(feature = "completion")]
 fn completion_script(shell: CompletionShell) -> &'static str {
     match shell {
         CompletionShell::Bash => include_str!("../completions/sk2.bash"),
@@ -463,6 +474,7 @@ fn run(cli: Cli) -> Result<(), String> {
 
     // Same for completions: emitting a script must work with no vault initialized,
     // and must not create one as a side effect of being asked.
+    #[cfg(feature = "completion")]
     if let Command::Completions { shell } = command {
         print!("{}", completion_script(shell));
         return Ok(());
@@ -473,7 +485,9 @@ fn run(cli: Cli) -> Result<(), String> {
     db::init_db(&conn);
 
     match command {
-        Command::Generate { .. } | Command::Completions { .. } => unreachable!(),
+        Command::Generate { .. } => unreachable!(),
+        #[cfg(feature = "completion")]
+        Command::Completions { .. } => unreachable!(),
         Command::Init => {
             vault::init_vault(&conn)?;
         }
@@ -889,6 +903,7 @@ fn main() -> process::ExitCode {
 
     // Hidden mode: print service names for shell completion, then exit. Before the
     // clipboard branch and before run(), so it never reaches vault_path().
+    #[cfg(feature = "completion")]
     if cli.list_services {
         return list_services_for_completion(cli.vault.as_deref());
     }

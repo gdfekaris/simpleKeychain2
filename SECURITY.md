@@ -83,6 +83,16 @@ These are deliberate trade-offs or accepted gaps, documented so you can judge th
 - **Service names are stored in plaintext.** Only the credential contents are encrypted. Anyone with
   read access to `vault.db` can see *which* services you have accounts with, though not the
   credentials. This is a queryability trade-off.
+- **Shell completion displays service names without a master password.** If you install the
+  completion script, pressing Tab runs a hidden `sk2 --list-services`, which prints stored service
+  names — no prompt, because nothing can prompt mid-Tab. `sk2 list` requires the master password;
+  completion does not. No credentials are exposed, and no new access is granted (anyone who can run
+  it can already read your `0600` vault file), but your account list becomes visible to whoever is
+  at your terminal or watching your screen. Service names identify the institutions you bank with
+  and work for, which is what a targeted phishing attempt needs. Completion is opt-in — you get it
+  only by installing the script — and it can be removed from the binary entirely by building with
+  `--no-default-features --features export,import`, which drops both the `completions` subcommand
+  and the `--list-services` flag.
 - **Windows has no equivalent file-permission hardening.** The `umask` and `0600` modes described
   above are Unix-only. On Windows, the vault and backup files inherit default ACLs.
 - **In-memory secret handling is best-effort.** Secrets are held in wrappers that wipe on drop,

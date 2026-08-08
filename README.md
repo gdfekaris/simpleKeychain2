@@ -317,9 +317,29 @@ sk2 completions powershell >> $PROFILE
 
 Start a new shell afterwards (or `. $PROFILE` on PowerShell). Service names are completed for `get`, `delete`, `edit`, and `rename`'s *first* argument. They are deliberately **not** completed for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are names you are coining rather than choosing, and `list` takes a substring filter, so offering exact names would imply the filter has to match one.
 
-**No master password is involved.** Completion calls a hidden `sk2 --list-services`, which reads only the service-name column — the one field sk2 stores in plaintext by design, so that lookups work without decrypting anything. It never prompts, never prints usernames or secrets, and exits silently if there is no vault. It also never *creates* anything: pressing Tab on a machine with no vault leaves the disk untouched.
-
 If the vault lives somewhere non-standard, completion honours `SK2_VAULT`, so exporting it in your shell profile is enough.
+
+#### The trade you are accepting
+
+Completion calls a hidden `sk2 --list-services`, which reads only the service-name column — the one field sk2 stores in plaintext by design, so lookups work without decrypting anything. It prints no usernames, passwords, notes, or URLs, exits silently when there is no vault, and never *creates* anything: pressing Tab on a machine with no vault leaves the disk untouched.
+
+**But it does not ask for your master password, and it cannot — nothing can prompt during a Tab press.** That is a deliberate exception to sk2's usual rule, and it is worth understanding before you install it:
+
+- `sk2 list` prompts for your master password before showing service names. Tab completion shows the same names without one. So anyone at your unlocked terminal can enumerate your accounts by pressing Tab, and your service list appears on screen during a screen share, a recording, or over someone's shoulder.
+- Service names are metadata worth protecting: they reveal which bank, employer, or exchange you hold accounts with, which is exactly what a targeted phishing attempt needs. Your credentials remain encrypted and are never exposed by completion.
+- This grants no *new* access. Anyone who can run `sk2 --list-services` can already read `~/.sk2/vault.db` directly — it is your own file. What changes is how easily those names are surfaced, and to whom they are visible.
+
+If that trade does not suit your situation — a shared machine, a workstation you screen-share from, an environment where the account list itself is sensitive — do not install the completion script. To remove the capability from the binary entirely, see below.
+
+#### Disabling shell completion
+
+Shell completion is a default Cargo feature. To build sk2 without it:
+
+```bash
+cargo build --release --locked --no-default-features --features export,import
+```
+
+The resulting binary has no `completions` subcommand and no `--list-services` flag — both are rejected as unknown, and the completion scripts are not compiled in at all. Service names are then reachable only through `sk2 list`, behind the master password.
 
 ## Creating Backups
 

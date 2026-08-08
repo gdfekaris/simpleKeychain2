@@ -34,11 +34,21 @@ credential it could not read.
   deliberately not for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are
   names you are coining rather than choosing, and `list` takes a substring filter.
 
-  No master password is involved: completion reads only the service-name column, which sk2 stores
-  in plaintext by design so that lookups work without decrypting anything. It never prompts, prints
-  no usernames or secrets, stays silent when there is no vault, and creates nothing — pressing Tab
-  on a machine with no vault leaves the disk untouched. `SK2_VAULT` is honoured, so a non-standard
-  vault location still completes.
+  Completion reads only the service-name column, which sk2 stores in plaintext by design so that
+  lookups work without decrypting anything. It prints no usernames or secrets, stays silent when
+  there is no vault, and creates nothing — pressing Tab on a machine with no vault leaves the disk
+  untouched. `SK2_VAULT` is honoured, so a non-standard vault location still completes.
+
+  **Know the trade before installing it.** Completion cannot ask for your master password —
+  nothing can prompt during a Tab press — so it shows service names without one, where `sk2 list`
+  requires it. Anyone at your unlocked terminal can therefore enumerate your accounts by pressing
+  Tab, and your service list appears during a screen share. No credentials are exposed and no new
+  access is granted (anyone who can run it can already read your `0600` vault file), but service
+  names identify the institutions you bank with and work for. It is opt-in — you get it only by
+  installing the script — and **`completion` is now a Cargo feature**, so
+  `--no-default-features --features export,import` produces a binary with no `completions`
+  subcommand, no `--list-services` flag, and no completion scripts compiled in. The README and
+  `SECURITY.md` both spell this out.
 
 - **`get --print`** displays the password instead of copying it, as an explicit opt-in. The bare
   value is written to stdout with nothing else, so `PASS=$(sk2 get github --print)` captures

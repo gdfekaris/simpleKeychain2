@@ -302,6 +302,7 @@ pub(crate) fn list_services(conn: &Connection) -> Vec<String> {
 /// middle of the user's half-typed command line. Silence is the only acceptable
 /// failure mode here, so a missing `credentials` table, a locked database, or an
 /// unreadable row all yield nothing rather than noise.
+#[cfg(feature = "completion")]
 pub(crate) fn list_services_quiet(conn: &Connection) -> Vec<String> {
     let Ok(mut stmt) = conn.prepare("SELECT service FROM credentials ORDER BY service") else {
         return Vec::new();
