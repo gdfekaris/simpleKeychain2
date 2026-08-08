@@ -24,14 +24,17 @@ All of these before tagging, on `main`:
 
 ## Tag and build
 
+Examples below use `vX.Y.Z`. Substitute the version you are releasing — deliberately not a real
+version number, so these commands cannot go stale and be copied verbatim into the wrong release.
+
 ```bash
-git tag -a v1.2.0 -m "sk2 1.2.0"
-git push origin v1.2.0
+git tag -a vX.Y.Z -m "sk2 X.Y.Z"
+git push origin vX.Y.Z
 ```
 
 Wait for the **Release** workflow to finish. It creates a *draft* release containing the four
 archives and `SHA256SUMS`. If any target fails to build, no draft appears — fix, delete the tag
-locally and remotely (`git tag -d v1.2.0 && git push origin :v1.2.0`), and start over. Never reuse
+locally and remotely (`git tag -d vX.Y.Z && git push origin :vX.Y.Z`), and start over. Never reuse
 a tag name that shipped; if a published release is broken, ship the next patch version instead.
 
 ## Verify, then sign
@@ -45,7 +48,7 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 # The artifact was built by this repo's release workflow at the tagged commit
 # (needs the gh CLI; can be run on any machine)
-gh attestation verify sk2-1.2.0-x86_64-unknown-linux-musl.tar.gz \
+gh attestation verify sk2-X.Y.Z-x86_64-unknown-linux-musl.tar.gz \
     --repo gdfekaris/simpleKeychain2
 ```
 
@@ -54,11 +57,11 @@ release these sums belong to:
 
 ```bash
 rsign sign SHA256SUMS -s ~/.minisign/sk2-release.key -x SHA256SUMS.minisig \
-    -t "sk2 v1.2.0"
+    -t "sk2 vX.Y.Z"
 ```
 
 Upload `SHA256SUMS.minisig` to the draft release (web UI, or
-`gh release upload v1.2.0 SHA256SUMS.minisig`).
+`gh release upload vX.Y.Z SHA256SUMS.minisig`).
 
 ## Publish
 

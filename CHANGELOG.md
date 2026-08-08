@@ -7,7 +7,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). sk2 is a comm
 rather than a library, so "breaking" refers to changes in CLI behaviour, the on-disk vault format, or
 backup compatibility — not to a Rust API.
 
-## [Unreleased] — will be 1.3.0
+## [Unreleased]
+
+Nothing yet.
+
+## [1.3.0] — 2026-08-08
 
 **Why 1.3.0 and not 2.0.0** (settled 2026-08-07, so it is not re-argued at tag time). The preamble
 above counts a change in CLI behaviour as breaking, and the GPG export abort is one: an export that
@@ -15,12 +19,7 @@ previously exited 0 now exits non-zero. It is still a minor release, because the
 appears only against an already-corrupt vault — a state that was never working, and where the old
 "success" *was* the defect. No command that succeeded before fails now.
 
-Nothing here is released yet. `Cargo.toml` still reads 1.2.0 deliberately: the version bump is a
-*precondition of tagging* (see `RELEASING.md`), not something to carry around between releases, so
-it happens when a release is actually cut. This section is the running record of what that release
-will contain. Everything below is on `main` and CI-verified.
-
-Three themes so far. sk2 now works on headless machines — servers, SSH sessions without display
+Three themes. sk2 now works on headless machines — servers, SSH sessions without display
 forwarding, containers — where `get` previously could not retrieve a password at all and
 `generate` exited with an error after printing. Decrypted credentials are wiped from memory more
 thoroughly. And backups are now all-or-nothing, so an export can no longer quietly omit a
@@ -272,7 +271,8 @@ from the master password with Argon2id.
 If you are still on this version, prefer 1.2.0: 1.0.0 predates the file-permission hardening, the
 SK2B backup format, and the GPG import fix described above.
 
-[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.2.0...main
+[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.0...main
+[1.3.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/gdfekaris/simpleKeychain2/releases/tag/v1.2.0
 [1.1.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/gdfekaris/simpleKeychain2/releases/tag/v1.0.0

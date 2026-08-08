@@ -36,8 +36,9 @@ There is no bug bounty.
 
 | Version | Supported |
 |---|---|
-| 1.2.x | Yes |
-| 1.1.x | No — never released; upgrade to 1.2.x |
+| 1.3.x | Yes |
+| 1.2.x | No — upgrade to 1.3.x |
+| 1.1.x | No — never released; upgrade to 1.3.x |
 | 1.0.x | No — predates the file-permission hardening and a data-loss fix in GPG import |
 
 Only the latest release receives fixes. There is no long-term-support line.
@@ -151,7 +152,7 @@ which proves it was built by this repository's release workflow, from this repos
 the tagged commit — not built elsewhere and uploaded. Requires the `gh` CLI:
 
 ```bash
-gh attestation verify sk2-1.2.0-x86_64-unknown-linux-musl.tar.gz \
+gh attestation verify sk2-1.3.0-x86_64-unknown-linux-musl.tar.gz \
     --repo gdfekaris/simpleKeychain2
 ```
 
