@@ -14,13 +14,28 @@ All of these before tagging, on `main`:
 - [ ] `git fetch origin` first, then confirm the working tree is clean and `main` matches
       `origin/main`. (Fetch before trusting `origin/*` — see project-assessment.md §7 for the time
       that lesson was learned.)
-- [ ] Version bumped in `Cargo.toml`, `Cargo.lock` regenerated (`cargo build`), both committed.
+- [ ] Version bumped in `Cargo.toml`, `Cargo.lock` regenerated with **`cargo build --release
+      --offline`**, both committed. Then check the diff: it must touch **exactly one line**, this
+      crate's own `version`. A plain `cargo build` is allowed to update every semver-compatible
+      dependency at once, which would bundle an unreviewed dependency change into a commit whose
+      message says "version bump" and whose changelog says nothing about it. `--offline` cannot
+      reach the registry, so it can only rewrite the version. If you *want* dependency updates, do
+      them in their own commit, before this one, where they can be seen and audited.
       The workflow refuses a tag that disagrees with `Cargo.toml`.
-- [ ] `CHANGELOG.md` has a section for this version.
-- [ ] CI green on the commit being tagged — all three platforms, MSRV, and audit jobs.
+- [ ] `CHANGELOG.md` has a section for this version, with a real date rather than "Unreleased".
+- [ ] CI green on the commit being tagged — all three platforms, MSRV, and audit jobs. **Check that
+      steps actually executed**, not just the run-level colour: a cancelled job reports a failure
+      indistinguishable from a real one, and an infrastructure outage can produce either. `gh run
+      view <id> --json jobs --jq '.jobs[] | "\(.conclusion) \([.steps[]|select(.conclusion!=null)]
+      |length)/\(.steps|length) \(.name)"'` shows both at once.
 - [ ] Locally: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] Locally: `cargo test` (the PTY suite needs a real machine; CI's Linux runner covers it too)
 - [ ] Locally: `cargo audit --deny warnings`
+- [ ] If anything under `completions/` changed: `completions/verify/run.sh`. It drives each script
+      through its own shell, because whether bash/zsh/fish interpret them correctly is not something
+      `cargo test` can observe. A shell that is not installed is reported SKIPPED and fails the run
+      — decide deliberately whether to ship a script no one has executed, and if so, say so in the
+      README as `completions/sk2.ps1` already does.
 
 ## Tag and build
 
