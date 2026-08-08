@@ -113,6 +113,30 @@ credential it could not read.
   `%USERNAME%`; and `/tmp`-is-tmpfs and `shred` advice was presented as applying to macOS. `verify`
   gained the usage section it never had.
 
+- **Two further README claims corrected, both of which the audit above had already fixed once and
+  later work falsified again.** Worth stating plainly, because the failure mode is not carelessness
+  but drift: a summary sentence is written accurately, a feature lands somewhere else in the
+  codebase, and nothing forces the two to be reconciled.
+
+  "Every command that touches the vault asks for your master password first. The one exception is
+  `generate`" was true until `completions` shipped in this release — it also touches nothing and
+  also does not prompt. This is the identical sentence the audit had corrected for `generate`. The
+  README now names both, and separately names Tab completion as a third and deliberately different
+  case, since that one *does* read the vault without a password.
+
+  The `export` walkthrough also described its prompts in the wrong order, reading as though the
+  passphrase came first and the `yes` confirmation were an afterthought. sk2 states what the export
+  will contain, requires `yes`, and only then asks for the passphrase twice; the output file is
+  opened after both.
+
+- **A style pass over `README.md` and `SECURITY.md`.** No described behaviour changed — this is
+  sentence construction only, concentrated in the procedural sections where a first-time user
+  spends their time. Self-cancelling sentences, redundant acronym glosses, jargon left unexplained
+  ("a blind TTY read"), and parentheticals that buried the actionable step were removed, and the
+  three longest sentences were split. "Zeroed memory" became "memory that is wiped when the command
+  finishes", which is what actually happens and matches the best-effort framing used everywhere
+  else.
+
 ### Internal
 
 - Test suite grew from 119 to 126, covering the memory-wiping types, the export counts, and the
