@@ -55,6 +55,13 @@ backup compatibility — not to a Rust API.
   why: compinit must autoload the script from `fpath`, and the trailing `_sk2 "$@"` that autoloading
   requires fails when the file is sourced directly.
 
+  Both regenerating lines are **guarded** (`command -v sk2 >/dev/null &&` / `type -q sk2 &&`).
+  Unguarded, they run sk2 at every shell start, so uninstalling it — or a `PATH` that does not yet
+  include it when the file runs — turns every new shell into a command-not-found error. fish is the
+  louder of the two: it prints `fish: Unknown command: sk2` followed by the offending line and a
+  caret. All four cases were run before being documented: each shell with sk2 present (registers)
+  and absent (silent).
+
   This corrects a claim that appeared in three places (`CLAUDE.md`, `next-steps.md`, and the doc
   comment on `completion_script`): that embedding the scripts in the binary means they "cannot drift
   from the CLI". That holds for the script `sk2 completions <shell>` *returns*, not for a copy on a

@@ -300,13 +300,16 @@ sk2 can complete subcommands, flags, and **stored service names** on Tab. `sk2 c
 
 ```bash
 # bash — regenerates on every shell start, so upgrades are picked up
-echo 'source <(sk2 completions bash)' >> ~/.bashrc
+echo 'command -v sk2 >/dev/null && source <(sk2 completions bash)' >> ~/.bashrc
 
 # fish — same idea; add this line to ~/.config/fish/config.fish
-sk2 completions fish | source
+type -q sk2 && sk2 completions fish | source
 ```
 
 Those two re-run sk2 each time a shell opens, so the completion always matches the installed binary.
+The `command -v` / `type -q` guard is not decoration: without it, uninstalling sk2 or reordering
+`PATH` so `sk2` is not yet visible when the file runs makes **every new shell** print an error at
+startup. Put the bash line after whatever sets your `PATH`.
 If you would rather install a file, these work too — but the file is a **snapshot**, so re-run the
 command after every sk2 upgrade:
 

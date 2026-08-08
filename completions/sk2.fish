@@ -1,9 +1,14 @@
 # fish completion for sk2
 #
-# Install:  add to ~/.config/fish/config.fish:  sk2 completions fish | source
+# Install:  add to ~/.config/fish/config.fish:
+#               type -q sk2 && sk2 completions fish | source
 #
 # That regenerates the script on every shell start, so it always matches the
 # installed binary and survives an sk2 upgrade.
+#
+# The guard matters: unguarded, uninstalling sk2 or a PATH that does not yet
+# include it prints "fish: Unknown command: sk2" plus the offending line in every
+# new shell.
 #
 # Or install a file -- but a file is a snapshot, so re-run after every upgrade or
 # it will keep offering the subcommands of the release you installed it from:

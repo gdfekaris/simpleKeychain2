@@ -1,10 +1,14 @@
 # bash completion for sk2
 #
-# Install:  echo 'source <(sk2 completions bash)' >> ~/.bashrc
+# Install:  echo 'command -v sk2 >/dev/null && source <(sk2 completions bash)' >> ~/.bashrc
 #
 # That form regenerates the script on every shell start, so it always matches the
 # installed binary and survives an sk2 upgrade. It also needs no bash-completion
 # package, since this script uses only bash builtins.
+#
+# The guard matters: unguarded, uninstalling sk2 or a PATH that does not yet
+# include it when .bashrc runs makes every new shell print a command-not-found
+# error at startup. Put the line after whatever sets PATH.
 #
 # Or install a file -- but a file is a snapshot, so re-run after every upgrade or
 # it will keep offering the subcommands of the release you installed it from:
