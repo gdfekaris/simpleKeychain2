@@ -300,6 +300,7 @@ sk2 can complete subcommands, flags, and **stored service names** on Tab. `sk2 c
 
 ```bash
 # bash — pick one of the two
+# (not ~/.bash_completion.d/ — bash-completion reads no such directory)
 mkdir -p ~/.local/share/bash-completion/completions
 sk2 completions bash > ~/.local/share/bash-completion/completions/sk2
 # or, without the bash-completion package:
@@ -317,13 +318,6 @@ sk2 completions fish > ~/.config/fish/completions/sk2.fish
 # PowerShell — see the verification note below before relying on this one
 sk2 completions powershell >> $PROFILE
 ```
-
-> **If you installed bash completion under the 1.3.0 instructions, check where it went.** They said
-> `~/.bash_completion.d/sk2`. That directory is a widely repeated myth: bash-completion does not
-> read it. It loads `~/.local/share/bash-completion/completions/` (the path above),
-> `/etc/bash_completion.d/`, and the single *file* `~/.bash_completion` — so a script left in
-> `~/.bash_completion.d/` is sourced by nothing, and Tab silently falls back to completing filenames
-> instead of service names. Move the file to the path above, or delete it and use the `source` line.
 
 > **The PowerShell script has never been run.** The bash, zsh and fish scripts have each been driven
 > through their own shell's completion machinery and behave as described here. The PowerShell script

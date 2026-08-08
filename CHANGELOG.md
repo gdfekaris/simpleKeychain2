@@ -21,10 +21,10 @@ backup compatibility — not to a Rust API.
   like completion had simply never been implemented.
 
   Both now give `~/.local/share/bash-completion/completions/sk2`, and say that the
-  `source <(sk2 completions bash)` alternative needs no bash-completion package at all. The README
-  additionally tells anyone who installed under the old instructions where their file went and what
-  to do about it. The fish line gained the `mkdir -p` it needed for a config directory that may not
-  exist yet. **The scripts themselves were correct and are unchanged** — only where users were told
+  `source <(sk2 completions bash)` alternative needs no bash-completion package at all, and both
+  carry a line saying that `~/.bash_completion.d/` is not read — it is a common enough belief to be
+  worth naming at the point where someone might substitute it for the correct path. The fish line
+  gained the `mkdir -p` it needed for a config directory that may not exist yet. **The scripts themselves were correct and are unchanged** — only where users were told
   to put them.
 
 - **`completions/verify` now checks the install path, not just the completion function.** Every
