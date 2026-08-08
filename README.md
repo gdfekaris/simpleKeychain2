@@ -74,7 +74,7 @@ Make sure `%USERPROFILE%\bin` is in your `PATH`, or choose another directory tha
 
 ## Usage
 
-Every command that touches the vault asks for your master password first. The one exception is `generate`, which neither reads nor writes the vault.
+Every command that touches the vault asks for your master password first. Two commands never touch it and so never ask: `generate`, which produces a password without storing it, and `completions`, which prints a shell script. Tab completion is a third case and a deliberate exception — it reads service names without a password, for the reasons set out in [The trade you are accepting](#the-trade-you-are-accepting).
 
 ### Initialize the vault
 
@@ -356,7 +356,7 @@ Plaintext is never written to disk in either format — the output file is opene
 sk2 export
 ```
 
-This creates `sk2-export.sk2backup` in your current directory and prompts you (twice) for a backup passphrase — you're also asked to type `yes` to confirm before anything is written.
+This creates `sk2-export.sk2backup` in your current directory. sk2 first states what the export will contain and asks you to type `yes` to continue, then prompts twice for a backup passphrase. Nothing is written to disk until both steps are complete.
 
 To choose a different output path:
 
