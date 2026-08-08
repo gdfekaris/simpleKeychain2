@@ -146,6 +146,12 @@ credential it could not read.
 
 ### Internal
 
+- **`completions/verify/run.sh` verifies the completion scripts against real shells.** The thing
+  under test is whether bash, zsh and fish interpret sk2's scripts as intended, which can only be
+  observed by running those shells — so it is shell scripts rather than `cargo test`, which already
+  covers the half that is sk2. 35 assertions against a scratch vault. A shell that is not installed
+  is reported SKIPPED and fails the run, so an absent shell is never mistaken for a verified one.
+
 - Test suite grew from 119 to 126, covering the memory-wiping types, the export counts, and the
   new abort-on-corrupt-row behaviour along with its deliberate exception for a credential deleted
   mid-export. The GPG export's CSV construction moved into a testable helper; previously that path
