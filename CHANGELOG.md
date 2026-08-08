@@ -9,6 +9,12 @@ backup compatibility — not to a Rust API.
 
 ## [Unreleased] — will be 1.3.0
 
+**Why 1.3.0 and not 2.0.0** (settled 2026-08-07, so it is not re-argued at tag time). The preamble
+above counts a change in CLI behaviour as breaking, and the GPG export abort is one: an export that
+previously exited 0 now exits non-zero. It is still a minor release, because the changed behaviour
+appears only against an already-corrupt vault — a state that was never working, and where the old
+"success" *was* the defect. No command that succeeded before fails now.
+
 Nothing here is released yet. `Cargo.toml` still reads 1.2.0 deliberately: the version bump is a
 *precondition of tagging* (see `RELEASING.md`), not something to carry around between releases, so
 it happens when a release is actually cut. This section is the running record of what that release
