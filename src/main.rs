@@ -283,8 +283,17 @@ enum CompletionShell {
 /// The completion scripts ship inside the binary rather than as files alongside it.
 ///
 /// A released sk2 is a single binary users drop on their PATH; anything on disk
-/// beside it would not survive that. `sk2 completions <shell> > <path>` is the whole
-/// installation story, and the scripts cannot drift from the binary that emits them.
+/// beside it would not survive that. `sk2 completions <shell>` is the whole
+/// installation story, and the script this returns cannot drift from the binary
+/// returning it.
+///
+/// That guarantee covers the emitted script, **not** a copy the user has written to
+/// disk. Upgrading sk2 replaces the binary and leaves any installed file untouched,
+/// so a file-based install goes stale silently — it keeps offering whichever
+/// subcommands existed when it was written, and a completion script may not print a
+/// warning. This is why the docs lead with `source <(sk2 completions bash)` and
+/// `sk2 completions fish | source`, which re-run this function on every shell start.
+/// zsh has no such form: compinit must autoload the script from `fpath`.
 #[cfg(feature = "completion")]
 fn completion_script(shell: CompletionShell) -> &'static str {
     match shell {

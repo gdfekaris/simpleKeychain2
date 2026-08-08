@@ -1,6 +1,15 @@
 # fish completion for sk2
 #
-# Install:  sk2 completions fish > ~/.config/fish/completions/sk2.fish
+# Install:  add to ~/.config/fish/config.fish:  sk2 completions fish | source
+#
+# That regenerates the script on every shell start, so it always matches the
+# installed binary and survives an sk2 upgrade.
+#
+# Or install a file -- but a file is a snapshot, so re-run after every upgrade or
+# it will keep offering the subcommands of the release you installed it from:
+#
+#           mkdir -p ~/.config/fish/completions
+#           sk2 completions fish > ~/.config/fish/completions/sk2.fish
 #
 # Service names come from `sk2 --list-services`, which reads only the plaintext
 # service column and never prompts for a master password.

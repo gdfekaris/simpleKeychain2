@@ -1,8 +1,16 @@
 # PowerShell completion for sk2
 #
-# Install:  sk2 completions powershell >> $PROFILE
-#      or:  sk2 completions powershell > ~\sk2-completion.ps1
-#           then add to $PROFILE:  . ~\sk2-completion.ps1
+# Install:  sk2 completions powershell > ~\sk2-completion.ps1
+#           then add to $PROFILE, once:  . ~\sk2-completion.ps1
+#
+# Refresh after an sk2 upgrade by re-running the first line only. A file is a
+# snapshot: left alone it will keep offering the subcommands of the release you
+# installed it from.
+#
+# NOT `sk2 completions powershell >> $PROFILE`. That was the documented install
+# until 2026-08-08 and it appends: running it again after an upgrade leaves two
+# copies of this script in the profile rather than replacing the first, and the
+# profile grows by one copy per upgrade.
 #
 # Reload with:  . $PROFILE
 #

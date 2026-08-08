@@ -7,6 +7,14 @@
 #           then add to ~/.zshrc, before `compinit`:
 #               fpath=(~/.zsh/completions $fpath)
 #
+# A file is a snapshot: re-run after every sk2 upgrade, or it will keep offering
+# the subcommands of the release you installed it from.
+#
+# Unlike bash and fish, zsh has no `source <(sk2 completions zsh)` equivalent.
+# compinit has to autoload this file from fpath, which is what the trailing
+# `_sk2 "$@"` below is for -- sourcing it directly runs that call outside the
+# completion system, where `_arguments` does not exist, and it fails.
+#
 # Service names come from `sk2 --list-services`, which reads only the plaintext
 # service column and never prompts for a master password.
 

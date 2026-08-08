@@ -299,25 +299,43 @@ Use this for separate work and personal vaults, for scripting, or for a non-stan
 sk2 can complete subcommands, flags, and **stored service names** on Tab. `sk2 completions <shell>` prints the script; where you put it depends on the shell.
 
 ```bash
-# bash — pick one of the two
+# bash — regenerates on every shell start, so upgrades are picked up
+echo 'source <(sk2 completions bash)' >> ~/.bashrc
+
+# fish — same idea; add this line to ~/.config/fish/config.fish
+sk2 completions fish | source
+```
+
+Those two re-run sk2 each time a shell opens, so the completion always matches the installed binary.
+If you would rather install a file, these work too — but the file is a **snapshot**, so re-run the
+command after every sk2 upgrade:
+
+```bash
+# bash (needs the bash-completion package)
 # (not ~/.bash_completion.d/ — bash-completion reads no such directory)
 mkdir -p ~/.local/share/bash-completion/completions
 sk2 completions bash > ~/.local/share/bash-completion/completions/sk2
-# or, without the bash-completion package:
-echo 'source <(sk2 completions bash)' >> ~/.bashrc
-
-# zsh — a directory on your $fpath, with the leading underscore in the filename
-mkdir -p ~/.zsh/completions && sk2 completions zsh > ~/.zsh/completions/_sk2
-# then in ~/.zshrc, BEFORE compinit:
-#   fpath=(~/.zsh/completions $fpath)
 
 # fish
 mkdir -p ~/.config/fish/completions
 sk2 completions fish > ~/.config/fish/completions/sk2.fish
 
+# zsh — a directory on your $fpath, with the leading underscore in the filename.
+# zsh has no regenerating form: compinit has to autoload the script, so a file it is.
+mkdir -p ~/.zsh/completions && sk2 completions zsh > ~/.zsh/completions/_sk2
+# then in ~/.zshrc, BEFORE compinit:
+#   fpath=(~/.zsh/completions $fpath)
+
 # PowerShell — see the verification note below before relying on this one
-sk2 completions powershell >> $PROFILE
+sk2 completions powershell > ~\sk2-completion.ps1
+# then add this line to $PROFILE, once:
+#   . ~\sk2-completion.ps1
 ```
+
+**Why the distinction matters.** A file copy keeps working after you upgrade sk2, but it keeps
+working *as it was*: a subcommand added in a later release will not complete, and one that was
+removed will still be offered. Nothing warns you, because a completion script is forbidden from
+printing anything. The regenerating forms above have no such gap.
 
 > **The PowerShell script has never been run.** The bash, zsh and fish scripts have each been driven
 > through their own shell's completion machinery and behave as described here. The PowerShell script

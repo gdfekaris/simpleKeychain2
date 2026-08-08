@@ -1,12 +1,17 @@
 # bash completion for sk2
 #
-# Install:  mkdir -p ~/.local/share/bash-completion/completions
+# Install:  echo 'source <(sk2 completions bash)' >> ~/.bashrc
+#
+# That form regenerates the script on every shell start, so it always matches the
+# installed binary and survives an sk2 upgrade. It also needs no bash-completion
+# package, since this script uses only bash builtins.
+#
+# Or install a file -- but a file is a snapshot, so re-run after every upgrade or
+# it will keep offering the subcommands of the release you installed it from:
+#
+#           mkdir -p ~/.local/share/bash-completion/completions
 #           sk2 completions bash > ~/.local/share/bash-completion/completions/sk2
 #      or:  sk2 completions bash > /etc/bash_completion.d/sk2   (system-wide, needs root)
-#      or:  echo 'source <(sk2 completions bash)' >> ~/.bashrc
-#
-# The first two need the bash-completion package; the third does not, since this
-# script uses only bash builtins.
 #
 # NOT ~/.bash_completion.d/ -- despite being widely repeated, bash-completion
 # reads no such directory. It loads the XDG path above, /etc/bash_completion.d,

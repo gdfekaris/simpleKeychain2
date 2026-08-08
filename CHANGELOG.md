@@ -35,6 +35,32 @@ backup compatibility — not to a Rust API.
   the old path it reports `complete -F _minimal sk2` and fails. Same lesson as the
   `gh attestation verify` defect found before the 1.3.0 release, in a different place.
 
+- **The PowerShell completion install appended to `$PROFILE` instead of replacing.** The documented
+  command was `sk2 completions powershell >> $PROFILE`, so re-running it after an sk2 upgrade — the
+  only way to refresh a completion script — left two copies of the script in the profile, and one
+  more with every upgrade after that. It now writes `~\sk2-completion.ps1` and has `$PROFILE`
+  dot-source that file once, so refreshing means rewriting one file. The PowerShell script itself
+  remains unexecuted and unverified, as documented.
+
+### Changed
+
+- **Completion install instructions now lead with the forms that survive an sk2 upgrade.** An
+  installed completion file is a snapshot: upgrading replaces the binary and never touches the file,
+  so it goes on offering whichever subcommands existed when it was written — a subcommand added in a
+  later release will not complete, one removed will still be offered, and nothing says so, because a
+  completion script is forbidden from printing. `README.md` now leads with
+  `source <(sk2 completions bash)` and `sk2 completions fish | source`, which regenerate on every
+  shell start, and marks the file-based installs as needing a re-run after each upgrade. Both
+  regenerating forms were run before being documented. **zsh deliberately has no such form** and says
+  why: compinit must autoload the script from `fpath`, and the trailing `_sk2 "$@"` that autoloading
+  requires fails when the file is sourced directly.
+
+  This corrects a claim that appeared in three places (`CLAUDE.md`, `next-steps.md`, and the doc
+  comment on `completion_script`): that embedding the scripts in the binary means they "cannot drift
+  from the CLI". That holds for the script `sk2 completions <shell>` *returns*, not for a copy on a
+  user's disk. Embedding did not remove the drift — it moved it somewhere harder to notice, since
+  the stale artifact is no longer a versioned file sitting beside the binary.
+
 ### Documentation
 
 - **`SECURITY.md` now says that attestation verification requires a GitHub account.** It previously
