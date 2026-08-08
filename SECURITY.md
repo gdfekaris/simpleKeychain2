@@ -119,6 +119,12 @@ machine with a key that is never given to CI, while the attestation is made by G
 infrastructure with no long-lived key at all. Check both if you can; either alone is far better
 than neither.
 
+**Only one of the two needs a GitHub account.** The signed checksums below can be verified by
+anyone, with no account, no login, and no GitHub tooling. The attestation is served by GitHub's API,
+which requires an authenticated request even for a public repository — so if you have no account, or
+would rather not sign in to check a download, do mechanism 1 and skip mechanism 2. You are not left
+unprotected: the signed checksums are the mechanism whose key never touches GitHub at all.
+
 Anything predating v1.2.0, or any prebuilt "sk2" binary found elsewhere, is unsigned and should be
 treated as untrusted — build from source instead.
 
@@ -149,12 +155,23 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 Each archive is attested with [GitHub build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations),
 which proves it was built by this repository's release workflow, from this repository's code, at
-the tagged commit — not built elsewhere and uploaded. Requires the `gh` CLI:
+the tagged commit — not built elsewhere and uploaded.
+
+Requires the [`gh` CLI](https://cli.github.com/) **and an authenticated GitHub account** — the
+attestation lives behind GitHub's API, which rejects anonymous requests even for a public
+repository. Run `gh auth login` first, or set `GH_TOKEN` to any token with `public_repo` scope.
+Without one, the command exits non-zero and prints a login prompt rather than a verification
+failure; that is a missing credential, not a bad artifact.
 
 ```bash
 gh attestation verify sk2-1.3.0-x86_64-unknown-linux-musl.tar.gz \
     --repo gdfekaris/simpleKeychain2
 ```
+
+Two things to know about the output. On success `gh` prints a summary **only to a terminal** — piped
+or redirected it succeeds silently, so trust the exit code, or pass `--format json` for a result you
+can read. And a genuine failure looks like `HTTP 404`: that is what you get if the file was not built
+by this repository's workflow, so treat a 404 as a failed verification rather than a missing page.
 
 ### What verification does not prove
 

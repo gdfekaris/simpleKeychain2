@@ -9,7 +9,21 @@ backup compatibility — not to a Rust API.
 
 ## [Unreleased]
 
-Nothing yet.
+### Documentation
+
+- **`SECURITY.md` now says that attestation verification requires a GitHub account.** It previously
+  said only "Requires the `gh` CLI", so a reader could install `gh`, follow the instructions exactly,
+  and meet an unexplained login prompt — with no hint of why checking a *public* download needs an
+  account. The likely response is to skip the check, which loses the mechanism for exactly the people
+  most inclined to use it. Found by running the *Verifying downloads* section against the published
+  1.3.0 release as an unauthenticated user would.
+
+  The section now states which mechanism needs an account and which does not: signed checksums can be
+  verified by anyone with no account and no GitHub tooling, so a reader without one still has a
+  complete verification path — and it is the one whose key never touches GitHub. It also records two
+  things about the output that are easy to misread: `gh` prints its summary only to a terminal, so
+  piped or redirected a success is completely silent, and a genuine verification failure surfaces as
+  `HTTP 404` rather than as a message about signatures.
 
 ## [1.3.0] — 2026-08-08
 
