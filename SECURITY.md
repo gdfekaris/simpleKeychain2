@@ -157,8 +157,8 @@ gh attestation verify sk2-1.2.0-x86_64-unknown-linux-musl.tar.gz \
 
 ### What verification does not prove
 
-Both mechanisms establish *where the bytes came from*, not that the code is free of defects. And
-platform code-signing is a separate, unrelated system: sk2 binaries are **not** Apple-notarized or
+Both mechanisms establish *where the bytes came from*, not that the code is free of defects.
+Platform code-signing is a separate, unrelated system: sk2 binaries are **not** Apple-notarized or
 Windows-Authenticode-signed (both are paid programs), so macOS Gatekeeper and Windows SmartScreen
 will warn on first run even for a fully verified download. On macOS:
 `xattr -d com.apple.quarantine sk2` after verifying.

@@ -52,7 +52,7 @@ mkdir -p ~/.local/bin
 cp target/release/simpleKeychain2 ~/.local/bin/sk2
 ```
 
-Most distros put `~/.local/bin` on your `PATH` automatically — but often only if the directory existed when your session started, so if `sk2` isn't found, log out and back in (or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile).
+Most distributions put `~/.local/bin` on your `PATH` automatically, but often only if the directory existed when your session started. If `sk2` isn't found, log out and back in — or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
 
 #### macOS
 
@@ -92,7 +92,7 @@ You'll be asked to enter and confirm your master password.
 sk2 add github
 ```
 
-Prompts for username and password (you must provide your own password). If the service already exists, it will be overwritten.
+Prompts for a username and a password that you supply yourself. If the service already exists, `add` overwrites it without asking.
 
 To attach a URL to the credential:
 
@@ -106,7 +106,7 @@ To attach notes (recovery codes, security question answers, etc.):
 sk2 add github --notes
 ```
 
-The `--notes` flag triggers an interactive prompt rather than accepting an inline value, so sensitive notes are never passed as a command-line argument and never appear in shell history. Both flags can be combined with each other and with `--generate`:
+`--notes` prompts you instead of taking a value on the command line, so recovery codes and security answers never reach your shell history. Both flags combine with each other and with `--generate`:
 
 ```bash
 sk2 add github --generate --notes --url https://github.com
@@ -118,7 +118,7 @@ To generate a random password instead:
 sk2 add github --generate
 ```
 
-This creates a 16-character random password (letters, digits, and symbols) using a cryptographically secure random number generator (ChaCha12 CSPRNG seeded from the OS entropy source via `getrandom`). The generated password is never printed to the terminal — use `sk2 get github` to copy it to your clipboard.
+This creates a 16-character password drawn from letters, digits, and symbols. The randomness comes from a ChaCha12 CSPRNG seeded by the operating system via `getrandom`. The password is never printed to the terminal — use `sk2 get github` to copy it to your clipboard.
 
 To specify a custom length (4–64):
 
@@ -135,9 +135,9 @@ sk2 add github --generate --charset hex            # 0–9, a–f
 sk2 add github --generate --charset dna            # A, C, G, T
 ```
 
-The default charset (`default`) uses letters, digits, and symbols. For small character sets like `hex` or `dna`, consider increasing `--length` to maintain adequate entropy — sk2 will warn you if generated entropy falls below 64 bits.
+`default` uses letters, digits, and symbols. For small character sets like `hex` or `dna`, increase `--length` to keep the entropy adequate — sk2 warns you if it falls below 64 bits.
 
-`--length` and `--charset` are only meaningful together with `--generate`; supplying either without it is rejected immediately, before you are asked for your master password.
+`--length` and `--charset` only apply to `--generate`. Passing either without it is rejected immediately — before sk2 asks for your master password.
 
 ### Generate a password without storing it
 
@@ -147,7 +147,7 @@ sk2 generate
 
 Generates a random password and prints it to your terminal. Unlike `add --generate`, nothing is stored — no vault access or master password is required.
 
-> **Security note:** Because the password is printed directly to your terminal, it will be visible in your terminal scroll-back history. Only use `generate` for throwaway passwords. To generate and store a password without it ever appearing on screen, use `sk2 add --generate` instead.
+> **Security note:** The password is printed to your terminal, so it stays in your scroll-back history. Only use `generate` for throwaway passwords. To generate and store one without it ever appearing on screen, use `sk2 add --generate` instead.
 
 The same length and character set options from `add --generate` are available:
 
@@ -173,13 +173,13 @@ To copy the username to clipboard instead:
 sk2 get github --username
 ```
 
-On a machine with no clipboard — a headless server, an SSH session without forwarding — the clipboard is unavailable and `get` fails rather than silently changing where the secret goes. To display the value instead, opt in explicitly:
+On a headless server, or in an SSH session without forwarding, there is no clipboard to copy to. `get` fails rather than silently changing where the secret goes. To display the value instead, opt in explicitly:
 
 ```bash
 sk2 get github --print
 ```
 
-`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. Be aware of what you are trading: printed output has no 10-second clear — it stays in your terminal scrollback and any session logs until you clear them. Prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
+`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. The trade: printed output has no 10-second clear. It stays in your terminal scrollback and any session logs until you clear them, so prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
 
 If no exact match is found, sk2 falls back to a case-insensitive substring search. A single match is used automatically; multiple matches are shown as a numbered list to pick from.
 
@@ -189,7 +189,7 @@ If no exact match is found, sk2 falls back to a case-insensitive substring searc
 sk2 edit github
 ```
 
-Prompts for a new username and password. Press Enter on either field to keep the current value. The password prompt is a blind TTY read — leave it blank to leave the password unchanged.
+Prompts for a new username and password. Press Enter at either prompt to keep the current value. Nothing is echoed while you type the password, so an empty entry is how you keep the existing one.
 
 To update only specific fields, use flags:
 
@@ -292,7 +292,7 @@ sk2 --vault ~/vaults/personal.db list
 SK2_VAULT=~/vaults/work.db sk2 list
 ```
 
-This is useful for maintaining separate vaults (work vs. personal), scripting, or non-standard home directory setups. Parent directories are created automatically.
+Use this for separate work and personal vaults, for scripting, or for a non-standard home directory. Parent directories are created automatically.
 
 ### Shell completion
 
@@ -400,13 +400,13 @@ There is no standalone decryptor for `.sk2backup` — the format is sk2-specific
 gpg -d sk2-export.csv.gpg > credentials.csv
 ```
 
-The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Notes and URL fields will be empty for credentials that have none set.
+The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Unset notes and URLs appear as empty fields.
 
 ### Extra precautions
 
-If you want to be thorough about minimizing exposure:
+To minimize exposure further:
 
-- **Prefer SK2B when you don't need a human-readable CSV.** The plaintext only ever exists inside `sk2 import`, which holds it in zeroed memory. The GPG path produces a plaintext CSV the moment you decrypt it, and from that point on secure deletion is your problem.
+- **Prefer SK2B when you don't need a human-readable CSV.** The plaintext exists only inside `sk2 import`, in memory that is wiped when the command finishes. The GPG path produces a plaintext CSV the moment you decrypt it, and from that point on secure deletion is your problem.
 
 - **If you decrypt a GPG export, decrypt to a RAM-backed filesystem.** Decrypting to RAM avoids writing plaintext to a physical disk where it could be recovered after deletion.
 
@@ -458,7 +458,7 @@ If you want to be thorough about minimizing exposure:
 
 ### Disabling export
 
-The export feature is included by default. If you don't want the export command in your binary at all (e.g., to eliminate bulk credential extraction as an attack surface), compile without it:
+The export feature is included by default. To remove bulk credential extraction as an attack surface, compile without it:
 
 ```bash
 cargo build --release --no-default-features --features import   # import only, no export
@@ -486,7 +486,7 @@ For SK2B, sk2 prompts directly for the backup passphrase (`rpassword`, never ech
 
 If a service in the backup already exists in your vault, it will be silently overwritten. Services not mentioned in the backup are left untouched.
 
-Import can also be used to recover corrupt credentials found by `sk2 verify` — you don't need to wipe the vault first. Be aware of the granularity, though: **every service present in the backup is overwritten**, not just the corrupt ones, so any credential you have changed since taking the backup will revert to its backed-up value. Only services absent from the backup are left as they are.
+Import also repairs corrupt credentials found by `sk2 verify`, with no need to wipe the vault first. Mind the granularity: **every service present in the backup is overwritten**, not just the corrupt ones, so any credential you have changed since taking the backup reverts to its backed-up value. Only services absent from the backup are left as they are.
 
 ### Transactional vs. best-effort
 
@@ -509,7 +509,7 @@ sk2 import backup.sk2backup          # restore all credentials
 ### Security during import
 
 - **Decryption stays in trusted code paths.** SK2B is decrypted in-process with `XChaCha20-Poly1305` after deriving the backup key via Argon2id; authentication failure aborts the import. GPG backups are handed to `gpg --decrypt`, and sk2 never parses the encrypted bytes itself.
-- **Plaintext is held in zeroed memory** — The decrypted CSV (and, for SK2B, the entire decrypted blob) is wrapped in `Zeroizing` and automatically wiped from memory when the import completes (or on any error). As everywhere in sk2, this is best-effort — the caveat in the Memory bullet under [Security](#security) applies here too.
+- **Plaintext is wiped from memory** — The decrypted CSV (and, for SK2B, the entire decrypted blob) is wrapped in `Zeroizing` and cleared when the import completes or fails. As everywhere in sk2, this is best-effort — the caveat in the Memory bullet under [Security](#security) applies here too.
 - **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the backup.
 - **Master password required** — The vault must be unlocked before import begins, same as every other command.
 - **Timestamps reset on import** — Imported credentials receive a last-updated timestamp of the moment of import. Neither backup format carries age information, so sk2 has no way to know when each password was originally set. This means `sk2 list --stale` will measure staleness from the import date, not from when the passwords were created. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
@@ -531,7 +531,7 @@ in **[CHANGELOG.md](CHANGELOG.md)**.
 
 - **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
 - **Key-derivation parameters** — Each vault records the Argon2id parameters it was created with, and is always unlocked using its own recorded values. A future release can raise the cost without locking existing vaults out; run `sk2 change-password` to re-key an existing vault under the newer, stronger parameters. Backups are separate: the `.sk2backup` format fixes its parameters as part of the container, so backups stay readable by any version of sk2 and by the iOS app.
-- **Memory** — Secrets (master password, derived key, decrypted passwords and notes) are held in `Zeroizing` wrappers and wiped when they go out of scope, including on error paths (e.g. wrong password, empty input) and on panics, since those unwind. This now covers the credential struct itself and the JSON buffers inside encryption and decryption, which were previously ordinary unwiped allocations. It remains best-effort rather than a guarantee: a wrapper wipes the allocation it holds at the moment it drops, so it cannot reach a copy left behind when a buffer grew and moved, nor scratch allocations inside third-party parsers. A memory dump or swap file could still contain plaintext. See `SECURITY.md`.
+- **Memory** — The master password, the derived key, and decrypted passwords and notes are held in `Zeroizing` wrappers and wiped when they go out of scope, including on error paths and on panics, which unwind. Coverage now includes the credential struct and the JSON buffers inside encryption and decryption, both previously left unwiped. It is still best-effort, not a guarantee: a wrapper wipes only the allocation it holds when it drops, so it cannot reach a copy left behind by a buffer that grew and moved, or scratch space inside a third-party parser. A memory dump or swap file could still contain plaintext. See `SECURITY.md`.
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds. `get` never prints a password unless you explicitly pass `--print`; if the clipboard is unavailable (headless machine, SSH without forwarding), `get` fails with a message naming that flag rather than printing on its own initiative. `generate` — which prints by design — treats a clipboard failure as a warning, not an error. Note that `--print` output has no equivalent of the 10-second clear: it persists in terminal scrollback and session logs.
 - **File permissions** — On Linux/macOS, sk2 applies a process-wide `umask` of `0077` before touching the filesystem, so everything it creates is owner-only from the moment it exists. `~/.sk2/` is created directly at `0700`, `vault.db` inherits `0600`, and backup files are opened with an explicit `0600` mode. Permissions are established at creation time rather than tightened afterward, which removes the window in which a newly created file would be briefly readable by others. On Windows, files inherit default ACLs — there is no equivalent hardening.
 - **Vault location** — By default, the vault is stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). Override with `--vault` or the `SK2_VAULT` environment variable (flag takes precedence). Parent directories are created automatically.
@@ -540,7 +540,7 @@ in **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## Testing
 
-The suite has two layers: unit tests alongside each module (cryptography, database, backup container, CSV parsing, CLI helpers) and — on Linux/macOS — end-to-end tests that drive the real binary through a pseudo-terminal, covering the interactive flows (init, add, edit, rename, change-password, export/import round-trip) that piped stdin cannot reach. No external dependencies or vault setup required; the end-to-end tests create and clean up their own scratch vaults.
+The suite has two layers. Unit tests sit alongside each module, covering cryptography, the database, the backup container, CSV parsing, and the CLI helpers. On Linux and macOS, end-to-end tests drive the real binary through a pseudo-terminal — the only way to reach the interactive flows (init, add, edit, rename, change-password, export/import round-trip), since piped stdin cannot answer a password prompt. Nothing external is required; the end-to-end tests create and clean up their own scratch vaults.
 
 ```bash
 cargo test                         # all tests (default features)
@@ -560,4 +560,4 @@ cargo test export::tests
 
 ## Platform Support
 
-Works on **Linux**, **macOS**, and **Windows**. Clipboard support is provided by [arboard](https://github.com/1Password/arboard) (maintained by 1Password) and requires a display server; on headless machines use `sk2 get <service> --print` to retrieve a password (`generate` works everywhere, warning if it cannot copy).
+Works on **Linux**, **macOS**, and **Windows**. The clipboard needs a display server; sk2 uses [arboard](https://github.com/1Password/arboard), maintained by 1Password. On a headless machine, retrieve passwords with `sk2 get <service> --print`. `generate` works everywhere and warns if it cannot copy.
