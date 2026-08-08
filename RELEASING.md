@@ -30,6 +30,22 @@ All of these before tagging, on `main`:
       |length)/\(.steps|length) \(.name)"'` shows both at once.
 - [ ] Locally: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] Locally: `cargo test` (the PTY suite needs a real machine; CI's Linux runner covers it too)
+- [ ] Locally, with the **previous release binary** on hand:
+      `SK2_OLD_BINARY=<path to previous release> cargo test --test cli vault_from_an_older_release`
+
+      This is the only check that a vault created by the last release still opens under this one. It
+      drives the real old binary through a PTY to create a vault and store a credential, then makes
+      the new build decrypt it *and* re-key it with `change-password` — exercising the per-vault
+      Argon2 parameter path (F2) end to end rather than at the storage layer only.
+
+      **It fails open.** With `SK2_OLD_BINARY` unset the test prints a `SKIPPED` line and reports
+      `ok`, indistinguishable from a pass in `cargo test`'s summary. Confirm it ran: a real run takes
+      seconds (Argon2) and prints no `SKIPPED` line; a skip takes 0.00s. 1.3.0 shipped without this
+      having been run for exactly that reason — it was counted as green.
+
+      Keep the previous release binary somewhere stable. On this machine `~/.local/bin/sk2` is the
+      1.2.0 build; if it is ever upgraded in place, copy it aside first or this check loses its
+      fixture and silently reverts to skipping.
 - [ ] Locally: `cargo audit --deny warnings`
 - [ ] If anything under `completions/` changed: `completions/verify/run.sh`. It drives each script
       through its own shell, because whether bash/zsh/fish interpret them correctly is not something
