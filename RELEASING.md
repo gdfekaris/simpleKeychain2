@@ -52,6 +52,25 @@ gh attestation verify sk2-X.Y.Z-x86_64-unknown-linux-musl.tar.gz \
     --repo gdfekaris/simpleKeychain2
 ```
 
+**`gh` prints its summary only to a terminal.** Redirected or piped, a *successful* verification
+produces no output at all and exits 0 — which reads exactly like a command that did nothing. Trust
+the exit code, or pass `--format json` for a result you can actually see.
+
+That exit code is worth something; checked 2026-08-08 against the published v1.2.0 artifact rather
+than assumed. The JSON records the signer as
+`https://github.com/gdfekaris/simpleKeychain2/.github/workflows/release.yml@refs/tags/v1.2.0` — the
+right workflow at the right tag — while the same archive checked against a different repository, and
+an unattested file checked against this one, both exit 1 with an HTTP 404. So a pass is not vacuous.
+
+If `gh` is missing, it needs no root: it ships as a static tarball, and `~/.local/bin` is usually
+already on `PATH`. Verifying by hand instead — fetching the Sigstore bundle from
+`api.github.com/repos/OWNER/REPO/attestations/sha256:<digest>` and checking it with `cosign` or
+`sigstore-python` — is possible but a poor trade. The work is not the download, it is pinning the
+certificate identity to the workflow above *and* the issuer to
+`https://token.actions.githubusercontent.com`. Omit either and you have confirmed only that some
+valid Sigstore signature exists, which anyone can produce — a check that looks passed and pins
+nothing, right before you vouch for those bytes with a key that never touches CI.
+
 Then sign the checksum file. The trusted comment (`-t`) is covered by the signature and pins which
 release these sums belong to:
 
