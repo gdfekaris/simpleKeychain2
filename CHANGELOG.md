@@ -7,11 +7,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). sk2 is a comm
 rather than a library, so "breaking" refers to changes in CLI behaviour, the on-disk vault format, or
 backup compatibility — not to a Rust API.
 
-## [Unreleased]
+## [Unreleased] — will be 1.3.0
 
-sk2 now works on headless machines — servers, SSH sessions without display forwarding, containers.
-Previously `get` could not retrieve a password at all without a clipboard, and `generate` exited
-with an error after printing.
+Nothing here is released yet. `Cargo.toml` still reads 1.2.0 deliberately: the version bump is a
+*precondition of tagging* (see `RELEASING.md`), not something to carry around between releases, so
+it happens when a release is actually cut. This section is the running record of what that release
+will contain. Everything below is on `main` and CI-verified.
+
+Three themes so far. sk2 now works on headless machines — servers, SSH sessions without display
+forwarding, containers — where `get` previously could not retrieve a password at all and
+`generate` exited with an error after printing. Decrypted credentials are wiped from memory more
+thoroughly. And backups are now all-or-nothing, so an export can no longer quietly omit a
+credential it could not read.
 
 ### Added
 
@@ -64,6 +71,26 @@ with an error after printing.
   buffer grew and moved, nor scratch allocations inside third-party parsers. `SECURITY.md` and the
   README describe the remaining limitation. There is no change to the vault format, the backup
   format, or any command's behaviour.
+
+### Documentation
+
+- **A full accuracy audit of the README fixed 17 defects**, several of which were instructions that
+  did not work as written. The install steps copied the binary into a directory that may not exist
+  (`cp` does not create parents), pointed macOS users at a path that is not on the default `PATH`,
+  omitted the C-toolchain requirement for the bundled SQLite on platforms other than Windows, did
+  not build with `--locked`, and used `sha256sum`, which stock macOS does not have. Other
+  corrections: `generate` was covered by a blanket "all commands require your master password"
+  claim (it does not); the backup-repair section implied only damaged credentials are overwritten
+  by an import, when every service present in the backup is; a PowerShell example used cmd-style
+  `%USERNAME%`; and `/tmp`-is-tmpfs and `shred` advice was presented as applying to macOS. `verify`
+  gained the usage section it never had.
+
+### Internal
+
+- Test suite grew from 119 to 123, covering the memory-wiping types, the export counts, and the
+  new abort-on-corrupt-row behaviour along with its deliberate exception for a credential deleted
+  mid-export. The GPG export's CSV construction moved into a testable helper; previously that path
+  could only be exercised by running `gpg` against a real terminal.
 
 ## [1.2.0] — 2026-08-05
 
@@ -177,6 +204,7 @@ from the master password with Argon2id.
 If you are still on this version, prefer 1.2.0: 1.0.0 predates the file-permission hardening, the
 SK2B backup format, and the GPG import fix described above.
 
+[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.2.0...main
 [1.2.0]: https://github.com/gdfekaris/simpleKeychain2/releases/tag/v1.2.0
 [1.1.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/gdfekaris/simpleKeychain2/releases/tag/v1.0.0
