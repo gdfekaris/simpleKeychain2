@@ -311,9 +311,16 @@ mkdir -p ~/.zsh/completions && sk2 completions zsh > ~/.zsh/completions/_sk2
 # fish
 sk2 completions fish > ~/.config/fish/completions/sk2.fish
 
-# PowerShell
+# PowerShell — see the verification note below before relying on this one
 sk2 completions powershell >> $PROFILE
 ```
+
+> **The PowerShell script has never been run.** The bash, zsh and fish scripts have each been driven
+> through their own shell's completion machinery and behave as described here. The PowerShell script
+> is written to the same specification, but no machine available to the maintainer runs PowerShell,
+> so nothing has confirmed it works — it may complete correctly, or it may fail to load. Treat it as
+> provisional until a release says otherwise. If you try it, a report either way is genuinely useful.
+> The other three shells are unaffected.
 
 Start a new shell afterwards (or `. $PROFILE` on PowerShell). Service names are completed for `get`, `delete`, `edit`, and `rename`'s *first* argument. They are deliberately **not** completed for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are names you are coining rather than choosing, and `list` takes a substring filter, so offering exact names would imply the filter has to match one.
 

@@ -34,6 +34,13 @@ credential it could not read.
   deliberately not for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are
   names you are coining rather than choosing, and `list` takes a substring filter.
 
+  **The bash, zsh and fish scripts are verified; the PowerShell script is not.** The first three
+  were each driven through their own shell's completion machinery and behave exactly as described
+  above. The PowerShell script is written to the same specification but has never been executed —
+  no machine available to the maintainer runs PowerShell — so it may work or may fail to load. The
+  README says so at the point of installation rather than leaving all four looking equally tested.
+  Verifying it is on the list for the next release.
+
   Completion reads only the service-name column, which sk2 stores in plaintext by design so that
   lookups work without decrypting anything. It prints no usernames or secrets, stays silent when
   there is no vault, and creates nothing — pressing Tab on a machine with no vault leaves the disk
