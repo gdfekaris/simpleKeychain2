@@ -137,6 +137,13 @@ jobs:
 
       # One SHA256SUMS over every archive, generated where all of them are in
       # one place. This is the file the maintainer signs locally.
+      #
+      # The source tarball is deliberately NOT built here. The maintainer
+      # generates it with `git archive` and appends its hash to this file
+      # before signing (RELEASING.md, "Add the source tarball"). Building it in
+      # CI would look tidier and would quietly cost the whole point: artifact
+      # and hash would then both come from the workflow, and the signature
+      # would no longer be an independent check on it.
       - name: Generate SHA256SUMS
         working-directory: dist
         run: sha256sum -- * | tee SHA256SUMS

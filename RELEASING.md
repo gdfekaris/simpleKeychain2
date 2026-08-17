@@ -29,6 +29,9 @@ All of these before tagging, on `main`:
       workflow checks the tag against `Cargo.toml` and cannot see prose. A stale marker is how the
       README came to describe 1.1.0 while `main` was on 1.3.0; a stale clone command is worse,
       because it silently builds the *previous* release for anyone following the instructions.
+      The grep also matches "up to and including v1.3.0 ship none", in the source-tarball note here
+      and in `SECURITY.md`. **Leave that one alone** — it is a statement about which releases lack a
+      source tarball, and it stays true forever. Bumping it would make it a lie.
 - [ ] CI green on the commit being tagged — all three platforms, MSRV, and audit jobs. **Check that
       steps actually executed**, not just the run-level colour: a cancelled job reports a failure
       indistinguishable from a real one, and an infrastructure outage can produce either. `gh run
@@ -85,7 +88,7 @@ archives and `SHA256SUMS`. If any target fails to build, no draft appears — fi
 locally and remotely (`git tag -d vX.Y.Z && git push origin :vX.Y.Z`), and start over. Never reuse
 a tag name that shipped; if a published release is broken, ship the next patch version instead.
 
-## Verify, then sign
+## Verify the draft
 
 Sign nothing you have not checked. From the draft release page, download `SHA256SUMS` and at least
 one archive, then:
@@ -119,16 +122,52 @@ certificate identity to the workflow above *and* the issuer to
 valid Sigstore signature exists, which anyone can produce — a check that looks passed and pins
 nothing, right before you vouch for those bytes with a key that never touches CI.
 
-Then sign the checksum file. The trusted comment (`-t`) is covered by the signature and pins which
-release these sums belong to:
+## Add the source tarball
+
+Someone who builds from source gets no verification from either mechanism above — the binaries are
+signed and attested, a `git clone` is neither. Tag signatures do not fill the gap: commits and tags
+here are GPG-signed, but that key is published nowhere, so it proves nothing to a user. A source
+tarball with its hash in the signed `SHA256SUMS` closes that, reusing the key users already have.
+
+Generate it **locally**, not in CI, and do it now — before signing, so its hash is covered:
+
+```bash
+git archive --format=tar.gz --prefix=sk2-X.Y.Z/ vX.Y.Z > sk2-X.Y.Z-src.tar.gz
+sha256sum sk2-X.Y.Z-src.tar.gz >> SHA256SUMS
+```
+
+`git archive` reads the tag out of the object database, so the working tree is irrelevant — a dirty
+checkout, a stale build directory, and anything in `.gitignore` cannot leak in. Run it anywhere the
+tag exists.
+
+Local generation is the point, not an accident of convenience. The workflow never touches this file,
+so the "compromise CI *and* the maintainer's key" property covers source as well as binaries. Do not
+move this into `release.yml` to save a step: that would put the artifact and its hash on the same
+side of the trust boundary, and the signature would stop meaning anything independent.
+
+## Sign
+
+Sign the checksum file — now including the source tarball's line. The trusted comment (`-t`) is
+covered by the signature and pins which release these sums belong to:
 
 ```bash
 rsign sign SHA256SUMS -s ~/.minisign/sk2-release.key -x SHA256SUMS.minisig \
     -t "sk2 vX.Y.Z"
 ```
 
-Upload `SHA256SUMS.minisig` to the draft release (web UI, or
-`gh release upload vX.Y.Z SHA256SUMS.minisig`).
+Upload the source tarball, the amended `SHA256SUMS`, and the signature. `--clobber` is required:
+`SHA256SUMS` already exists on the draft, and the copy CI generated does not have the source line.
+
+```bash
+gh release upload vX.Y.Z sk2-X.Y.Z-src.tar.gz SHA256SUMS SHA256SUMS.minisig --clobber
+```
+
+Confirm the uploaded sums are the amended ones — a signature over a file the release does not
+actually serve verifies fine locally and fails for every user:
+
+```bash
+gh release download vX.Y.Z -p SHA256SUMS -O - | grep src
+```
 
 ## Publish
 

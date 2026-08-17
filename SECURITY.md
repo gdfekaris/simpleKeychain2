@@ -128,6 +128,12 @@ unprotected: the signed checksums are the mechanism whose key never touches GitH
 Anything predating v1.2.0, or any prebuilt "sk2" binary found elsewhere, is unsigned and should be
 treated as untrusted — build from source instead.
 
+**Building from source is covered too, where a source tarball is offered.** A release that includes
+`sk2-X.Y.Z-src.tar.gz` has that file listed in `SHA256SUMS` alongside the binaries, so mechanism 1
+verifies it exactly the same way — which is worth preferring over `git clone`, since a clone is
+authenticated by nothing but TLS to GitHub. Mechanism 2 does **not** apply to it; see the note under
+that heading. Releases up to and including v1.3.0 ship no source tarball.
+
 ### 1. Signed checksums (minisign)
 
 Every release includes `SHA256SUMS` and a detached signature `SHA256SUMS.minisig`, made with the
@@ -172,6 +178,13 @@ Two things to know about the output. On success `gh` prints a summary **only to 
 or redirected it succeeds silently, so trust the exit code, or pass `--format json` for a result you
 can read. And a genuine failure looks like `HTTP 404`: that is what you get if the file was not built
 by this repository's workflow, so treat a 404 as a failed verification rather than a missing page.
+
+**This mechanism covers the binary archives only.** Do not run it against `SHA256SUMS`,
+`SHA256SUMS.minisig`, or `sk2-X.Y.Z-src.tar.gz` — none of them are built by the workflow, so all
+three return the same `HTTP 404` that a tampered binary would, and by the rule just above that reads
+as an attack. It is not one. Those files are covered by mechanism 1 instead, which is the stronger
+of the two for exactly this reason: the source tarball is produced and hashed on the maintainer's
+machine, so a compromise of CI cannot reach it at all.
 
 ### What verification does not prove
 
