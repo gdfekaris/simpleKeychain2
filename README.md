@@ -47,12 +47,16 @@ Expect two platform warnings, because sk2's binaries are not enrolled in the pai
 Requires [Rust](https://www.rust-lang.org/tools/install) **1.88 or newer**, plus a C compiler for the bundled SQLite — on Linux install your distro's build tools (e.g. `sudo apt install build-essential`), on macOS the Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
-git clone https://github.com/gdfekaris/simpleKeychain2.git
+git clone --branch v1.3.0 --depth 1 https://github.com/gdfekaris/simpleKeychain2.git
 cd simpleKeychain2
 cargo build --release --locked
 ```
 
+**Build from the tag, not from `main`.** `main` is the only long-lived branch in this repository, so it is also where in-progress work lands — including work that may be revised or reverted before it ships. Cloning without `--branch` puts you on whatever was pushed most recently, which is not a release and has not been through the release checklist. The tag above is the exact tree that release's binaries were built from; substitute the latest version from the [releases page](https://github.com/gdfekaris/simpleKeychain2/releases).
+
 `--locked` builds the exact dependency versions committed in `Cargo.lock` — the same tree CI tests and audits, and the one the release binaries are built from.
+
+If you *want* the development tip, drop the `--branch` and `--depth` flags deliberately. Everything in this README applies to `main`; see the note at the top about features that may not be in a release yet.
 
 #### Linux
 
