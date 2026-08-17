@@ -1,41 +1,50 @@
 # simpleKeychain2 (sk2)
 
-A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password.
+**v1.3.0** · A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password. Works on **Linux**, **macOS**, and **Windows**.
 
 > This README tracks the `main` branch and may describe features newer than the latest release. Each release archive ships the README that matches it; released versions are listed in [CHANGELOG.md](CHANGELOG.md) and on the [releases page](https://github.com/gdfekaris/simpleKeychain2/releases).
 
-## How It Works
+## Contents
 
-- Your master password is run through **Argon2id** to derive a 256-bit encryption key.
-- Each credential (username, password, and any notes/URL) is encrypted as one blob with **XChaCha20-Poly1305** using a unique random nonce.
-- The service name is bound as **authenticated associated data (AAD)**, preventing ciphertext from being swapped between database rows.
-- Everything is stored in a local **SQLite** database (`~/.sk2/vault.db` by default).
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Shell Completion](#shell-completion)
+- [Backup & Restore](#backup--restore)
+- [Security Model](#security-model)
+- [Testing](#testing)
+- [License](#license)
+
+## Quick Start
+
+```bash
+sk2 init                 # set your master password (run once)
+sk2 add github           # store a credential (prompts for username/password)
+sk2 get github           # copy the password to your clipboard
+```
+
+That's the core workflow. Everything else below is detail.
 
 ## Installation
 
 ### Option 1 — download a release
 
-Prebuilt binaries for Linux (x86_64, fully static), macOS (Apple silicon and Intel), and Windows
-(x86_64) are on the [releases page](https://github.com/gdfekaris/simpleKeychain2/releases). Each
-archive contains the binary already named `sk2` plus this documentation.
+Prebuilt binaries for Linux (x86_64, fully static), macOS (Apple silicon and Intel), and Windows (x86_64) are on the [releases page](https://github.com/gdfekaris/simpleKeychain2/releases). Each archive contains the binary already named `sk2` plus this documentation.
 
-**Verify before running** — every release ships signed checksums and a build provenance
-attestation; the commands are in [SECURITY.md](SECURITY.md#verifying-downloads). The short version:
+**Verify before running** — every release ships signed checksums and a build provenance attestation; the full commands are in [SECURITY.md](SECURITY.md#verifying-downloads). The short version:
 
 ```bash
 minisign -Vm SHA256SUMS -P RWS11s9lPe0uHbOvhlPE8TLPZGoW14AjTY+K1WK+RvTalQhyd+coaEwj
 sha256sum -c SHA256SUMS --ignore-missing    # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
 tar xzf sk2-<version>-<target>.tar.gz
-sudo cp sk2-*/sk2 /usr/local/bin/           # or any directory on your PATH — see the per-platform notes below
+sudo cp sk2-*/sk2 /usr/local/bin/           # or any directory on your PATH
 ```
 
-Two platform warnings to expect, because sk2's binaries are not enrolled in the paid Apple/Microsoft
-code-signing programs (this is unrelated to the verification above): macOS quarantines the binary
-until `xattr -d com.apple.quarantine sk2`, and Windows SmartScreen needs "More info → Run anyway".
+Expect two platform warnings, because sk2's binaries are not enrolled in the paid Apple/Microsoft code-signing programs (this is unrelated to the verification above): macOS quarantines the binary until `xattr -d com.apple.quarantine sk2`, and Windows SmartScreen needs "More info → Run anyway".
 
 ### Option 2 — build from source
 
-Requires [Rust](https://www.rust-lang.org/tools/install) 1.88 or newer, plus a C compiler for the bundled SQLite — on Linux install your distro's build tools (e.g. `sudo apt install build-essential`), on macOS the Xcode Command Line Tools (`xcode-select --install`).
+Requires [Rust](https://www.rust-lang.org/tools/install) **1.88 or newer**, plus a C compiler for the bundled SQLite — on Linux install your distro's build tools (e.g. `sudo apt install build-essential`), on macOS the Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
 git clone https://github.com/gdfekaris/simpleKeychain2.git
@@ -72,9 +81,31 @@ copy target\release\simpleKeychain2.exe $env:USERPROFILE\bin\sk2.exe
 
 Make sure `%USERPROFILE%\bin` is in your `PATH`, or choose another directory that is.
 
+### Compile-time features
+
+sk2 has three optional features — `export`, `import`, and `completion` — all enabled by default. Any of them can be left out of the binary entirely. An excluded subcommand doesn't appear in `--help`, is rejected as unknown, and its code isn't compiled in at all.
+
+```bash
+# keep backups, drop the completion surface (see "The trade you are accepting")
+cargo build --release --locked --no-default-features --features export,import
+
+# import only — no bulk credential extraction
+cargo build --release --locked --no-default-features --features import
+
+# export only
+cargo build --release --locked --no-default-features --features export
+
+# none of the three
+cargo build --release --locked --no-default-features
+```
+
+Dropping `export` removes bulk credential extraction as an attack surface. Dropping `completion` removes the one path that reveals service names without a master password — see [The trade you are accepting](#the-trade-you-are-accepting).
+
 ## Usage
 
 Every command that touches the vault asks for your master password first. Two commands never touch it and so never ask: `generate`, which produces a password without storing it, and `completions`, which prints a shell script. Tab completion is a third case and a deliberate exception — it reads service names without a password, for the reasons set out in [The trade you are accepting](#the-trade-you-are-accepting).
+
+Clipboard support is provided by [arboard](https://github.com/1Password/arboard), maintained by 1Password.
 
 ### Initialize the vault
 
@@ -157,7 +188,7 @@ sk2 generate --charset alphanumeric
 sk2 generate --length 32 --charset websafe
 ```
 
-The generated password is also copied to your clipboard and cleared after 10 seconds.
+The generated password is also copied to your clipboard and cleared after 10 seconds. The clipboard is an enhancement here, not a requirement: if it is unavailable, `generate` warns and still exits 0, since the password is already on screen.
 
 ### Retrieve a credential
 
@@ -259,6 +290,16 @@ sk2 list --stale --days 180    # flag anything older than 6 months
 sk2 list --stale --days 30     # stricter 30-day policy
 ```
 
+### Verify vault integrity
+
+```bash
+sk2 verify
+```
+
+Attempts to decrypt every credential with the current master password and prints a per-service ✓/✗. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. The exit code is non-zero if any credential fails, so it can gate scripts.
+
+If a credential fails: restore it from a backup with `sk2 import` (only the services present in the backup are overwritten — no need to wipe the vault first), or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
+
 ### Change master password
 
 ```bash
@@ -267,17 +308,9 @@ sk2 change-password
 
 Re-encrypts all stored credentials under the new password. The vault remains intact if anything fails mid-way.
 
-### Verify vault integrity
-
-```bash
-sk2 verify
-```
-
-Attempts to decrypt every credential and prints a per-service ✓/✗. Run it after an unexpected crash, a filesystem event, or before an export. The exit code is non-zero if any credential fails, so it can gate scripts. If an entry fails: restore it from a backup with `sk2 import` (see [Restoring from Backup](#restoring-from-backup)), or `sk2 delete <service>` and reset that password on the affected site.
-
 ### Custom vault path
 
-By default, sk2 stores the vault at `~/.sk2/vault.db`. To use a different location, set the `SK2_VAULT` environment variable or pass the `--vault` flag (the flag takes precedence).
+By default, sk2 stores the vault at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). To use a different location, set the `SK2_VAULT` environment variable or pass the `--vault` flag (the flag takes precedence).
 
 ```bash
 # Using the environment variable
@@ -294,7 +327,7 @@ SK2_VAULT=~/vaults/work.db sk2 list
 
 Use this for separate work and personal vaults, for scripting, or for a non-standard home directory. Parent directories are created automatically.
 
-### Shell completion
+## Shell Completion
 
 sk2 can complete subcommands, flags, and **stored service names** on Tab. `sk2 completions <shell>` prints the script; where you put it depends on the shell.
 
@@ -306,12 +339,9 @@ echo 'command -v sk2 >/dev/null && source <(sk2 completions bash)' >> ~/.bashrc
 type -q sk2 && sk2 completions fish | source
 ```
 
-Those two re-run sk2 each time a shell opens, so the completion always matches the installed binary.
-The `command -v` / `type -q` guard is not decoration: without it, uninstalling sk2 or reordering
-`PATH` so `sk2` is not yet visible when the file runs makes **every new shell** print an error at
-startup. Put the bash line after whatever sets your `PATH`.
-If you would rather install a file, these work too — but the file is a **snapshot**, so re-run the
-command after every sk2 upgrade:
+Those two re-run sk2 each time a shell opens, so the completion always matches the installed binary. The `command -v` / `type -q` guard is not decoration: without it, uninstalling sk2 or reordering `PATH` so `sk2` is not yet visible when the file runs makes **every new shell** print an error at startup. Put the bash line after whatever sets your `PATH`.
+
+If you would rather install a file, these work too — but the file is a **snapshot**, so re-run the command after every sk2 upgrade:
 
 ```bash
 # bash (needs the bash-completion package)
@@ -335,23 +365,15 @@ sk2 completions powershell > ~\sk2-completion.ps1
 #   . ~\sk2-completion.ps1
 ```
 
-**Why the distinction matters.** A file copy keeps working after you upgrade sk2, but it keeps
-working *as it was*: a subcommand added in a later release will not complete, and one that was
-removed will still be offered. Nothing warns you, because a completion script is forbidden from
-printing anything. The regenerating forms above have no such gap.
+**Why the distinction matters.** A file copy keeps working after you upgrade sk2, but it keeps working *as it was*: a subcommand added in a later release will not complete, and one that was removed will still be offered. Nothing warns you, because a completion script is forbidden from printing anything. The regenerating forms above have no such gap.
 
-> **The PowerShell script has never been run.** The bash, zsh and fish scripts have each been driven
-> through their own shell's completion machinery and behave as described here. The PowerShell script
-> is written to the same specification, but no machine available to the maintainer runs PowerShell,
-> so nothing has confirmed it works — it may complete correctly, or it may fail to load. Treat it as
-> provisional until a release says otherwise. If you try it, a report either way is genuinely useful.
-> The other three shells are unaffected.
+> **The PowerShell script has never been run.** The bash, zsh and fish scripts have each been driven through their own shell's completion machinery and behave as described here. The PowerShell script is written to the same specification, but no machine available to the maintainer runs PowerShell, so nothing has confirmed it works — it may complete correctly, or it may fail to load. Treat it as provisional until a release says otherwise. If you try it, a report either way is genuinely useful. The other three shells are unaffected.
 
 Start a new shell afterwards (or `. $PROFILE` on PowerShell). Service names are completed for `get`, `delete`, `edit`, and `rename`'s *first* argument. They are deliberately **not** completed for `sk2 add`, `rename`'s second argument, or `sk2 list` — the first two are names you are coining rather than choosing, and `list` takes a substring filter, so offering exact names would imply the filter has to match one.
 
 If the vault lives somewhere non-standard, completion honours `SK2_VAULT`, so exporting it in your shell profile is enough.
 
-#### The trade you are accepting
+### The trade you are accepting
 
 Completion calls a hidden `sk2 --list-services`, which reads only the service-name column — the one field sk2 stores in plaintext by design, so lookups work without decrypting anything. It prints no usernames, passwords, notes, or URLs, exits silently when there is no vault, and never *creates* anything: pressing Tab on a machine with no vault leaves the disk untouched.
 
@@ -361,34 +383,26 @@ Completion calls a hidden `sk2 --list-services`, which reads only the service-na
 - Service names are metadata worth protecting: they reveal which bank, employer, or exchange you hold accounts with, which is exactly what a targeted phishing attempt needs. Your credentials remain encrypted and are never exposed by completion.
 - This grants no *new* access. Anyone who can run `sk2 --list-services` can already read `~/.sk2/vault.db` directly — it is your own file. What changes is how easily those names are surfaced, and to whom they are visible.
 
-If that trade does not suit your situation — a shared machine, a workstation you screen-share from, an environment where the account list itself is sensitive — do not install the completion script. To remove the capability from the binary entirely, see below.
+If that trade does not suit your situation — a shared machine, a workstation you screen-share from, an environment where the account list itself is sensitive — do not install the completion script. To remove the capability from the binary entirely, build with `--no-default-features --features export,import` (see [Compile-time features](#compile-time-features)). The resulting binary has no `completions` subcommand and no `--list-services` flag, and the scripts are not compiled in at all. Service names are then reachable only through `sk2 list`, behind the master password.
 
-#### Disabling shell completion
+## Backup & Restore
 
-Shell completion is a default Cargo feature. To build sk2 without it:
-
-```bash
-cargo build --release --locked --no-default-features --features export,import
-```
-
-The resulting binary has no `completions` subcommand and no `--list-services` flag — both are rejected as unknown, and the completion scripts are not compiled in at all. Service names are then reachable only through `sk2 list`, behind the master password.
-
-## Creating Backups
-
-sk2 can export all your credentials into an encrypted backup file. Two formats are supported:
+sk2 can export all your credentials into an encrypted backup file and restore from it later. Two formats are supported:
 
 - **SK2B** (default) — native sk2 backup using Argon2id + XChaCha20-Poly1305. Self-contained, needs no external tools, and is byte-compatible with the iOS sk2 mobile app.
 - **GPG** (legacy) — GPG-encrypted CSV. Requires [GPG](https://gnupg.org/) in your `PATH`. Uses a weaker KDF than SK2B; kept for compatibility with older exports.
 
 Plaintext is never written to disk in either format — the output file is opened with `O_EXCL | O_CREAT` at mode `0600`, and the decrypted credentials live only in zeroed memory.
 
-### Basic export
+For operational hardening — RAM-backed decryption, secure deletion, removable media, and backup verification — see [docs/backup-security.md](docs/backup-security.md).
+
+### Exporting
 
 ```bash
 sk2 export
 ```
 
-This creates `sk2-export.sk2backup` in your current directory. sk2 first states what the export will contain and asks you to type `yes` to continue, then prompts twice for a backup passphrase. Nothing is written to disk until both steps are complete.
+This creates `sk2-export.sk2backup` in your current directory. sk2 first states what the export will contain and asks you to type `yes` to continue, then prompts twice for a backup passphrase. Nothing is written to disk until both steps are complete. Use a passphrase that is **different from your vault master password** — if someone obtains both the vault file and the backup file, one password shouldn't unlock both.
 
 To choose a different output path:
 
@@ -402,9 +416,7 @@ If the output file already exists, the command fails rather than clobbering it. 
 sk2 export -o backup.sk2backup --overwrite
 ```
 
-### Choosing a format
-
-Use `--format` to pick explicitly, or let sk2 infer it from the output extension:
+Use `--format` to pick a format explicitly, or let sk2 infer it from the output extension:
 
 ```bash
 sk2 export                                   # SK2B, default filename
@@ -416,103 +428,16 @@ sk2 export -o backup.csv.gpg                 # inferred: GPG
 
 If `--output` has an unrecognized extension and `--format` isn't set, sk2 refuses to guess.
 
-### Decrypting the backup
+**Exports are all-or-nothing in both formats.** If any credential fails to decrypt, the export aborts and no file is written — you are told which entry failed and pointed at `sk2 verify`. A backup exists to be trusted later, and one that silently omits entries is worse than no backup at all, because you stop looking for the missing data. Nothing is lost by failing: the unreadable credential was already unreadable, and the fix is to repair it (`sk2 import` from an older backup) or drop it (`sk2 delete`) and reset that password upstream. A credential *deleted* while the export is running is a different case and is simply reported and omitted — there is no data to lose.
 
-**SK2B** files can only be restored with sk2 itself (or the iOS sk2 mobile app):
-
-```bash
-sk2 import sk2-export.sk2backup
-```
-
-There is no standalone decryptor for `.sk2backup` — the format is sk2-specific. If you need a human-readable export, use `--format gpg` instead.
-
-**GPG** files can be decrypted with GPG directly, no sk2 required:
-
-```bash
-gpg -d sk2-export.csv.gpg > credentials.csv
-```
-
-The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Unset notes and URLs appear as empty fields.
-
-### Extra precautions
-
-To minimize exposure further:
-
-- **Prefer SK2B when you don't need a human-readable CSV.** The plaintext exists only inside `sk2 import`, in memory that is wiped when the command finishes. The GPG path produces a plaintext CSV the moment you decrypt it, and from that point on secure deletion is your problem.
-
-- **If you decrypt a GPG export, decrypt to a RAM-backed filesystem.** Decrypting to RAM avoids writing plaintext to a physical disk where it could be recovered after deletion.
-
-  Linux (`/tmp` is usually a tmpfs — confirm with `df -T /tmp` before relying on it; on macOS `/tmp` is ordinary disk, so prefer SK2B or create a RAM disk there):
-  ```bash
-  gpg -d sk2-export.csv.gpg > /tmp/credentials.csv
-  # use the file, then:
-  shred -u /tmp/credentials.csv
-  ```
-  Windows (requires a RAM disk tool like [ImDisk](https://sourceforge.net/projects/imdisk-toolkit/)):
-  ```powershell
-  gpg -d sk2-export.csv.gpg > R:\credentials.csv
-  # use the file, then delete it — or simply unmount the RAM disk
-  ```
-
-- **Securely delete any decrypted CSV.** Regular deletion only removes the directory entry — the data remains on disk until overwritten.
-
-  Linux:
-  ```bash
-  shred -u credentials.csv
-  ```
-  macOS ships no `shred`; install GNU coreutils (`brew install coreutils`, then `gshred -u`) — or avoid needing it by decrypting only to RAM.
-  Windows (built-in `cipher /w` wipes free space in a directory after you delete the file):
-  ```powershell
-  del credentials.csv
-  cipher /w:C:\path\to\directory
-  ```
-  Note: secure deletion is ineffective on copy-on-write filesystems (ZFS, Btrfs) and SSDs with wear leveling, which is why decrypting to a RAM-backed filesystem is the safer option.
-
-- **Export directly to removable media.** Write the backup file to a USB drive, then physically disconnect it:
-  ```bash
-  sk2 export -o /mnt/usb/sk2-export.sk2backup      # Linux/macOS
-  sk2 export -o E:\sk2-export.sk2backup             # Windows
-  ```
-- **Verify the backup.** After exporting, confirm you can restore it before relying on it. For SK2B, do a dry run against a throwaway vault:
-  ```bash
-  SK2_VAULT=/tmp/verify.db sk2 init
-  SK2_VAULT=/tmp/verify.db sk2 import sk2-export.sk2backup
-  rm /tmp/verify.db
-  ```
-  For GPG:
-  ```bash
-  gpg -d sk2-export.csv.gpg | head -2               # Linux/macOS
-  ```
-  ```powershell
-  gpg -d sk2-export.csv.gpg | Select-Object -First 2   # Windows (PowerShell)
-  ```
-- **Use a different passphrase.** Whether you pick SK2B or GPG, the backup passphrase is independent of your vault master password. Don't reuse them — if someone obtains both the vault file and the backup file, one password shouldn't unlock both.
-
-### Disabling export
-
-The export feature is included by default. To remove bulk credential extraction as an attack surface, compile without it:
-
-```bash
-cargo build --release --no-default-features --features import   # import only, no export
-cargo build --release --no-default-features                     # neither export nor import
-```
-
-This removes the `export` subcommand entirely — it won't appear in `--help` and the code is excluded from the binary.
-
-## Restoring from Backup
-
-sk2 can import credentials from either backup format `export` produces. The format is autodetected by reading the first four bytes of the file — files starting with the `SK2B` magic go through the native importer; anything else is treated as a GPG-encrypted CSV and handed to `gpg --decrypt` (requires [GPG](https://gnupg.org/) in your `PATH`).
-
-Both formats accept the 5-column schema `name,username,password,notes,url` and older 3-column exports (`name,username,password`) — notes and URL are left empty for 3-column rows. Export always writes 5 columns; 3-column support exists only for reading backups made by older versions of sk2.
-
-The two importers differ in how strictly they treat a bad row, not in which schemas they accept — see [Transactional vs. best-effort](#transactional-vs-best-effort) below.
-
-### Basic import
+### Importing
 
 ```bash
 sk2 import sk2-export.sk2backup        # SK2B (native)
 sk2 import sk2-export.csv.gpg          # legacy GPG CSV
 ```
+
+The format is autodetected by reading the first four bytes of the file — files starting with the `SK2B` magic go through the native importer; anything else is treated as a GPG-encrypted CSV and handed to `gpg --decrypt` (requires [GPG](https://gnupg.org/) in your `PATH`).
 
 For SK2B, sk2 prompts directly for the backup passphrase (`rpassword`, never echoed). For GPG, decryption happens in `gpg` and its own pinentry handles the prompt. In both cases you must type `yes` to confirm before any credentials are written.
 
@@ -520,14 +445,30 @@ If a service in the backup already exists in your vault, it will be silently ove
 
 Import also repairs corrupt credentials found by `sk2 verify`, with no need to wipe the vault first. Mind the granularity: **every service present in the backup is overwritten**, not just the corrupt ones, so any credential you have changed since taking the backup reverts to its backed-up value. Only services absent from the backup are left as they are.
 
-### Transactional vs. best-effort
+**Both formats accept both schemas.** The 5-column `name,username,password,notes,url` is what export always writes; older 3-column exports (`name,username,password`) are also accepted by both importers, with notes and URL left empty. 3-column support exists only for reading backups made by older versions of sk2.
+
+**Transactional vs. best-effort:**
 
 - **SK2B imports are transactional.** All rows are inserted inside a single SQLite transaction; if any row fails to parse or insert, the transaction rolls back and your vault is left exactly as it was. Partial imports never land.
 - **GPG imports are best-effort within a valid file.** Rows with the wrong number of fields or an empty service name are reported and skipped, and the rest are imported. This preserves the behavior of older sk2 exports, which may contain stray lines from hand-edited CSVs.
 
-  A *malformed quote* is the exception: because notes may legitimately contain newlines, a stray or unterminated quote misaligns every record after it, so it cannot be attributed to a single row. The whole import aborts with an error and nothing is written. Either way a rejected file never leaves the vault half-populated: GPG imports validate the entire file before writing anything, and SK2B imports run inside a transaction that rolls back on the first bad row.
+  A *malformed quote* is the exception: because notes may legitimately contain newlines, a stray or unterminated quote misaligns every record after it, so it cannot be attributed to a single row. The whole import aborts with an error and nothing is written.
 
-- **Exports are all-or-nothing in both formats.** If any credential fails to decrypt, the export aborts and no file is written — you are told which entry failed and pointed at `sk2 verify`. A backup exists to be trusted later, and one that silently omits entries is worse than no backup at all, because you stop looking for the missing data. Nothing is lost by failing: the unreadable credential was already unreadable, and the fix is to repair it (`sk2 import` from an older backup) or drop it (`sk2 delete`) and reset that password upstream. A credential *deleted* while the export is running is a different case and is simply reported and omitted — there is no data to lose.
+Either way, a rejected file never leaves the vault half-populated: GPG imports validate the entire file before writing anything, and SK2B imports run inside a transaction that rolls back on the first bad row.
+
+**Timestamps reset on import.** Imported credentials receive a last-updated timestamp of the moment of import — neither backup format carries age information, so `sk2 list --stale` will measure staleness from the import date, not from when the passwords were originally set. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
+
+### Decrypting a backup outside sk2
+
+**SK2B** files can only be restored with sk2 itself (or the iOS sk2 mobile app). There is no standalone decryptor for `.sk2backup` — the format is sk2-specific. If you need a human-readable export, use `--format gpg` instead.
+
+**GPG** files can be decrypted with GPG directly, no sk2 required:
+
+```bash
+gpg -d sk2-export.csv.gpg > credentials.csv
+```
+
+The CSV has five columns: `name`, `username`, `password`, `notes`, `url`. Unset notes and URLs appear as empty fields. Once decrypted, secure handling of the plaintext CSV is your responsibility — see [docs/backup-security.md](docs/backup-security.md).
 
 ### Round-trip example
 
@@ -538,37 +479,32 @@ sk2 init                              # set up a new vault
 sk2 import backup.sk2backup          # restore all credentials
 ```
 
-### Security during import
+## Security Model
 
-- **Decryption stays in trusted code paths.** SK2B is decrypted in-process with `XChaCha20-Poly1305` after deriving the backup key via Argon2id; authentication failure aborts the import. GPG backups are handed to `gpg --decrypt`, and sk2 never parses the encrypted bytes itself.
-- **Plaintext is wiped from memory** — The decrypted CSV (and, for SK2B, the entire decrypted blob) is wrapped in `Zeroizing` and cleared when the import completes or fails. As everywhere in sk2, this is best-effort — the caveat in the Memory bullet under [Security](#security) applies here too.
-- **Each credential is re-encrypted individually** — Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the backup.
-- **Master password required** — The vault must be unlocked before import begins, same as every other command.
-- **Timestamps reset on import** — Imported credentials receive a last-updated timestamp of the moment of import. Neither backup format carries age information, so sk2 has no way to know when each password was originally set. This means `sk2 list --stale` will measure staleness from the import date, not from when the passwords were created. If you are importing old credentials and care about rotation tracking, update the passwords after importing.
+For the threat model — what sk2 is and is not designed to protect against — plus known limitations and how to report a vulnerability, see **[SECURITY.md](SECURITY.md)**. Release-by-release changes are in **[CHANGELOG.md](CHANGELOG.md)**.
 
-### Disabling import
+### Encryption
 
-Like export, the import feature can be excluded at compile time:
+- Your master password is run through **Argon2id** (4 iterations, 128 MiB) to derive a 256-bit encryption key.
+- Each credential (username, password, and any notes/URL) is encrypted as one blob with **XChaCha20-Poly1305** using a unique random nonce.
+- The service name is bound as **authenticated associated data (AAD)**, preventing ciphertext from being swapped between database rows.
+- Everything is stored in a local **SQLite** database (`~/.sk2/vault.db` by default; see [Custom vault path](#custom-vault-path)).
+- **Key-derivation parameters are recorded per vault.** Each vault is always unlocked using its own recorded Argon2id values, so a future release can raise the cost without locking existing vaults out; run `sk2 change-password` to re-key an existing vault under the newer, stronger parameters. Backups are separate: the `.sk2backup` format fixes its parameters as part of the container, so backups stay readable by any version of sk2 and by the iOS app.
 
-```bash
-cargo build --release --no-default-features --features export   # export only, no import
-cargo build --release --no-default-features                     # neither export nor import
-```
+### Runtime protections
 
-## Security
-
-For the threat model — what sk2 is and is not designed to protect against — plus known limitations
-and how to report a vulnerability, see **[SECURITY.md](SECURITY.md)**. Release-by-release changes are
-in **[CHANGELOG.md](CHANGELOG.md)**.
-
-- **Encryption** — Credentials are encrypted with XChaCha20-Poly1305 with per-service AAD. The encryption key is derived from your master password using Argon2id (4 iterations, 128 MiB).
-- **Key-derivation parameters** — Each vault records the Argon2id parameters it was created with, and is always unlocked using its own recorded values. A future release can raise the cost without locking existing vaults out; run `sk2 change-password` to re-key an existing vault under the newer, stronger parameters. Backups are separate: the `.sk2backup` format fixes its parameters as part of the container, so backups stay readable by any version of sk2 and by the iOS app.
-- **Memory** — The master password, the derived key, and decrypted passwords and notes are held in `Zeroizing` wrappers and wiped when they go out of scope, including on error paths and on panics, which unwind. Coverage now includes the credential struct and the JSON buffers inside encryption and decryption, both previously left unwiped. It is still best-effort, not a guarantee: a wrapper wipes only the allocation it holds when it drops, so it cannot reach a copy left behind by a buffer that grew and moved, or scratch space inside a third-party parser. A memory dump or swap file could still contain plaintext. See `SECURITY.md`.
+- **Memory** — The master password, the derived key, and decrypted passwords and notes are held in `Zeroizing` wrappers and wiped when they go out of scope, including on error paths and on panics, which unwind. Coverage includes the credential struct and the JSON buffers inside encryption and decryption. It is still best-effort, not a guarantee: a wrapper wipes only the allocation it holds when it drops, so it cannot reach a copy left behind by a buffer that grew and moved, or scratch space inside a third-party parser. A memory dump or swap file could still contain plaintext. See [SECURITY.md](SECURITY.md).
 - **Clipboard** — Copied passwords are automatically cleared from the clipboard after 10 seconds. `get` never prints a password unless you explicitly pass `--print`; if the clipboard is unavailable (headless machine, SSH without forwarding), `get` fails with a message naming that flag rather than printing on its own initiative. `generate` — which prints by design — treats a clipboard failure as a warning, not an error. Note that `--print` output has no equivalent of the 10-second clear: it persists in terminal scrollback and session logs.
 - **File permissions** — On Linux/macOS, sk2 applies a process-wide `umask` of `0077` before touching the filesystem, so everything it creates is owner-only from the moment it exists. `~/.sk2/` is created directly at `0700`, `vault.db` inherits `0600`, and backup files are opened with an explicit `0600` mode. Permissions are established at creation time rather than tightened afterward, which removes the window in which a newly created file would be briefly readable by others. On Windows, files inherit default ACLs — there is no equivalent hardening.
-- **Vault location** — By default, the vault is stored at `~/.sk2/vault.db` (`C:\Users\<USERNAME>\.sk2\vault.db` on Windows). Override with `--vault` or the `SK2_VAULT` environment variable (flag takes precedence). Parent directories are created automatically.
 - **Password strength feedback** — When you manually enter a password during `add`, `edit`, or `change-password`, or choose a backup passphrase during `export`, sk2 estimates the entropy in bits and displays a strength label (Weak / Fair / Strong / Very strong). This is informational only — no password is rejected. Entropy is estimated conservatively by detecting which character classes are present (lowercase, uppercase, digits, symbols) rather than assuming the full character set.
-- **Vault integrity check** — `sk2 verify` attempts to decrypt every credential with the current master password and reports which pass and which fail. Run it after an unexpected crash, a filesystem event, or before an export to confirm the vault is intact. Exits with a non-zero status code if any credential fails, making it suitable for use in scripts. If a credential fails: restore it from a backup with `sk2 import`, or delete it with `sk2 delete <service>` and reset the password on the affected site if no backup exists.
+- **Vault integrity check** — `sk2 verify` decrypts every credential with the current master password and reports which pass and which fail, exiting non-zero if any fails. See [Verify vault integrity](#verify-vault-integrity).
+
+### Backup and import security
+
+- **Decryption stays in trusted code paths.** SK2B is decrypted in-process with XChaCha20-Poly1305 after deriving the backup key via Argon2id; authentication failure aborts the import. GPG backups are handed to `gpg --decrypt`, and sk2 never parses the encrypted bytes itself.
+- **Plaintext is held in zeroed memory.** The decrypted CSV (and, for SK2B, the entire decrypted blob) is wrapped in `Zeroizing` and cleared when the import completes or fails. The best-effort caveat in the Memory bullet above applies here too.
+- **Each credential is re-encrypted individually.** Imported credentials are encrypted with fresh random nonces and AAD-bound to their service name, exactly like `sk2 add`. They are not stored as-is from the backup.
+- **Master password required.** The vault must be unlocked before import begins, same as every other command.
 
 ## Testing
 
@@ -576,7 +512,7 @@ The suite has two layers. Unit tests sit alongside each module, covering cryptog
 
 ```bash
 cargo test                         # all tests (default features)
-cargo test --no-default-features   # without export/import
+cargo test --no-default-features   # without export/import/completion
 cargo test --test cli              # just the end-to-end suite (Unix only)
 ```
 
@@ -590,6 +526,6 @@ cargo test import::tests
 cargo test export::tests
 ```
 
-## Platform Support
+## License
 
-Works on **Linux**, **macOS**, and **Windows**. The clipboard needs a display server; sk2 uses [arboard](https://github.com/1Password/arboard), maintained by 1Password. On a headless machine, retrieve passwords with `sk2 get <service> --print`. `generate` works everywhere and warns if it cannot copy.
+MIT — see [LICENSE](LICENSE).

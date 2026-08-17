@@ -91,6 +91,9 @@ jobs:
           dir="sk2-${version}-${{ matrix.target }}"
           mkdir "$dir"
           cp README.md LICENSE CHANGELOG.md SECURITY.md "$dir/"
+          # docs/ ships too: README links to docs/backup-security.md with a
+          # relative path, which 404s inside the archive if the file is absent.
+          cp -r docs "$dir/"
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${{ matrix.target }}/release/simpleKeychain2.exe" "$dir/sk2.exe"
             7z a "$dir.zip" "$dir"

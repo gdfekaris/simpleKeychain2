@@ -23,6 +23,9 @@ All of these before tagging, on `main`:
       them in their own commit, before this one, where they can be seen and audited.
       The workflow refuses a tag that disagrees with `Cargo.toml`.
 - [ ] `CHANGELOG.md` has a section for this version, with a real date rather than "Unreleased".
+- [ ] `README.md`'s opening line names this version. It is the one version string in the repo that
+      nothing enforces — the workflow checks the tag against `Cargo.toml` and cannot see prose. A
+      stale marker there is how the README came to describe 1.1.0 while `main` was on 1.3.0.
 - [ ] CI green on the commit being tagged — all three platforms, MSRV, and audit jobs. **Check that
       steps actually executed**, not just the run-level colour: a cancelled job reports a failure
       indistinguishable from a real one, and an infrastructure outage can produce either. `gh run
