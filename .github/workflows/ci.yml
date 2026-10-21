@@ -11,6 +11,12 @@ on:
   # catches toolchain regressions between commits.
   schedule:
     - cron: '0 6 * * 1'
+  # Manual runs (Actions tab, or `gh workflow run CI`). GitHub disables a repo's
+  # scheduled workflows after 60 days without commits, and that turns off the
+  # push trigger too -- so after re-enabling (`gh workflow enable CI`) the
+  # commit already on main otherwise has no way to get a run. Happened
+  # 2026-10-20.
+  workflow_dispatch:
 
 jobs:
   check:
