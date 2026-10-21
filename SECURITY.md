@@ -170,7 +170,7 @@ Without one, the command exits non-zero and prints a login prompt rather than a 
 failure; that is a missing credential, not a bad artifact.
 
 ```bash
-gh attestation verify sk2-1.3.0-x86_64-unknown-linux-musl.tar.gz \
+gh attestation verify sk2-1.3.1-x86_64-unknown-linux-musl.tar.gz \
     --repo gdfekaris/simpleKeychain2
 ```
 

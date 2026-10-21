@@ -1,6 +1,6 @@
 # simpleKeychain2 (sk2)
 
-**v1.3.0** · A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password. Works on **Linux**, **macOS**, and **Windows**.
+**v1.3.1** · A lightweight, local-only CLI password manager. No servers, no sync, no network. Your credentials stay on your machine, encrypted with your master password. Works on **Linux**, **macOS**, and **Windows**.
 
 > This README tracks the `main` branch and may describe features newer than the latest release. Each release archive ships the README that matches it; released versions are listed in [CHANGELOG.md](CHANGELOG.md) and on the [releases page](https://github.com/gdfekaris/simpleKeychain2/releases).
 
@@ -51,7 +51,7 @@ Requires [Rust](https://www.rust-lang.org/tools/install) **1.88 or newer**, plus
 To build from a clone instead:
 
 ```bash
-git clone --branch v1.3.0 --depth 1 https://github.com/gdfekaris/simpleKeychain2.git
+git clone --branch v1.3.1 --depth 1 https://github.com/gdfekaris/simpleKeychain2.git
 cd simpleKeychain2
 cargo build --release --locked
 ```

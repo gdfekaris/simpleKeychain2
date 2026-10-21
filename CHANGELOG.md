@@ -9,6 +9,8 @@ backup compatibility — not to a Rust API.
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-10-20
+
 ### Fixed
 
 - **The bash completion install instructions pointed at a directory nothing reads, so Tab completed
@@ -360,7 +362,8 @@ from the master password with Argon2id.
 If you are still on this version, prefer 1.2.0: 1.0.0 predates the file-permission hardening, the
 SK2B backup format, and the GPG import fix described above.
 
-[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.0...main
+[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.1...main
+[1.3.1]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/gdfekaris/simpleKeychain2/releases/tag/v1.2.0
 [1.1.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.0.0...v1.1.0

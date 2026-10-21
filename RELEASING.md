@@ -52,26 +52,15 @@ All of these before tagging, on `main`:
       seconds (Argon2) and prints no `SKIPPED` line; a skip takes 0.00s. 1.3.0 shipped without this
       having been run for exactly that reason — it was counted as green.
 
-      Keep the previous release binary somewhere stable. On this machine `~/.local/bin/sk2` is the
-      1.2.0 build; if it is ever upgraded in place, copy it aside first or this check loses its
-      fixture and silently reverts to skipping.
+      Keep the previous release binary somewhere stable. On this machine `~/.local/bin/sk2` serves,
+      as long as it is the latest *published* release: install release builds there and never a
+      build of `main`, or this check compares the new code against itself and proves nothing.
 - [ ] Locally: `cargo audit --deny warnings`
 - [ ] If anything under `completions/` changed: `completions/verify/run.sh`. It drives each script
       through its own shell, because whether bash/zsh/fish interpret them correctly is not something
       `cargo test` can observe. A shell that is not installed is reported SKIPPED and fails the run
       — decide deliberately whether to ship a script no one has executed, and if so, say so in the
       README as `completions/sk2.ps1` already does.
-- [ ] **Before 1.4.0, once:** confirm `docs/` actually lands in the archive. `release.yml`'s Package
-      step gained `cp -r docs "$dir/"` in 325f75e, and nothing has exercised it — packaging only runs
-      on a tag or a dispatch, so a released archive is the first place the mistake would show. Run
-      the dry run (Actions tab → Release → *Run workflow*; `workflow_dispatch` builds the full matrix
-      and packages, but skips attestation and the draft release, so nothing is published), download
-      one `sk2-main-<target>` artifact, and check `docs/backup-security.md` is inside it.
-
-      Not a cosmetic check: `README.md` links to that file with a relative path. On GitHub the link
-      resolves against the repository, so a browser reader cannot see the breakage — only someone who
-      downloaded the archive can, which is the audience least likely to report it. Once a dry run has
-      confirmed this, delete this item; it is a one-time check of a step, not a per-release one.
 
 ## Tag and build
 
