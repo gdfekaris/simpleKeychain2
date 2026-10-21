@@ -108,6 +108,11 @@ complete_for "" "sk2 rename github "
 complete_for "" "sk2 list "
 complete_for "$SERVICES" "sk2 --vault /tmp/v.db get "
 complete_for "bash|fish|powershell|zsh" "sk2 completions "
+# get's flags (S4). --notes and --print exclude each other, so once one is on the
+# line the other must not be offered.
+complete_for "--notes|--print|--username" "sk2 get github --"
+complete_for "--username" "sk2 get github --print --"
+complete_for "--username" "sk2 get github --notes --"
 zpty -d ZSH 2>/dev/null
 
 echo "  ---- zsh: $pass passed, $fail failed"

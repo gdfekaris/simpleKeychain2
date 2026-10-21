@@ -70,6 +70,30 @@ fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
     path
 }
 
+/// How `get` treats a credential's notes (S4).
+#[cfg_attr(test, derive(Debug, PartialEq))]
+enum NotesDisplay<'a> {
+    Absent,
+    /// Notes exist but were not asked for. `get` says so, without showing them —
+    /// otherwise a user who upgraded would conclude their notes were gone.
+    Hidden,
+    Shown(&'a str),
+}
+
+/// Notes are treated as secret everywhere else — typed at a TTY prompt, never on
+/// the command line, wiped from memory — but `get` used to print them on every
+/// call, into scrollback, session logs and screen shares. They now take
+/// `--notes`, the same explicit opt-in `--print` is for the password.
+fn notes_display(notes: &str, show: bool) -> NotesDisplay<'_> {
+    if notes.is_empty() {
+        NotesDisplay::Absent
+    } else if show {
+        NotesDisplay::Shown(notes)
+    } else {
+        NotesDisplay::Hidden
+    }
+}
+
 /// Refuse a vault that another local user could read or replace (S3).
 ///
 /// sk2 creates its own files owner-only, but `--vault` and `SK2_VAULT` can point at
@@ -357,6 +381,10 @@ enum Command {
         /// (for headless machines and scripting; the password stays in scrollback)
         #[arg(long)]
         print: bool,
+        /// Also show the notes, which are hidden by default because they often
+        /// hold recovery codes or security answers
+        #[arg(long, conflicts_with = "print")]
+        notes: bool,
     },
     /// Delete a credential by service name
     Delete {
@@ -749,6 +777,7 @@ fn run(cli: Cli) -> Result<(), String> {
             service,
             username: copy_username,
             print,
+            notes: show_notes,
         } => {
             let key = vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
@@ -818,8 +847,10 @@ fn run(cli: Cli) -> Result<(), String> {
                     if !url.is_empty() {
                         ui::get_url(&url);
                     }
-                    if !notes.is_empty() {
-                        ui::get_notes(&notes);
+                    match notes_display(&notes, show_notes) {
+                        NotesDisplay::Absent => {}
+                        NotesDisplay::Hidden => ui::get_notes_hidden(),
+                        NotesDisplay::Shown(notes) => ui::get_notes(notes),
                     }
                     ui::get_updated_at(updated_at);
                     ui::clipboard_notice(clipboard_label, CLIPBOARD_CLEAR_SECONDS);
@@ -1448,5 +1479,34 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- get --notes (S4) --
+
+    #[test]
+    fn notes_are_hidden_unless_asked_for() {
+        assert_eq!(notes_display("recovery: 1234", false), NotesDisplay::Hidden);
+        assert_eq!(
+            notes_display("recovery: 1234", true),
+            NotesDisplay::Shown("recovery: 1234")
+        );
+    }
+
+    /// No hint for an entry without notes — it would claim something is hidden.
+    #[test]
+    fn no_notes_means_no_notes_line() {
+        assert_eq!(notes_display("", false), NotesDisplay::Absent);
+        assert_eq!(notes_display("", true), NotesDisplay::Absent);
+    }
+
+    /// `--print` emits exactly one bare value; notes are not one of its choices.
+    #[test]
+    fn get_notes_conflicts_with_print() {
+        assert!(Cli::try_parse_from(["sk2", "get", "svc", "--notes"]).is_ok());
+        assert!(Cli::try_parse_from(["sk2", "get", "svc", "--notes", "--username"]).is_ok());
+        let err = Cli::try_parse_from(["sk2", "get", "svc", "--notes", "--print"])
+            .err()
+            .expect("conflict");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 }

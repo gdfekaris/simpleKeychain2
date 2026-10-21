@@ -70,5 +70,8 @@ complete_for "" "sk2 list "
 complete_for "$SERVICES" "sk2 --vault /tmp/v.db get "
 complete_for "bash fish powershell zsh" "sk2 completions "
 
+# get's flags, --notes included (S4).
+complete_for "--notes --print --username --vault" "sk2 get github --"
+
 echo "  ---- fish: $pass passed, $fail failed"
 exit $(( fail > 0 ))

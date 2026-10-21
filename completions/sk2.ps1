@@ -86,7 +86,7 @@ Register-ArgumentCompleter -Native -CommandName sk2 -ScriptBlock {
     }
 
     $flags = switch ($subcommand) {
-        'get'      { @('--username', '--print') }
+        'get'      { @('--username', '--print', '--notes') }
         'edit'     { @('--username', '--password', '--notes', '--url') }
         'add'      { @('--generate', '--length', '--charset', '--notes', '--url') }
         'generate' { @('--length', '--charset') }

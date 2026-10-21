@@ -52,6 +52,16 @@ backup compatibility — not to a Rust API.
   zero, which also covers macOS and the `gpg` processes sk2 starts. Root can still read any
   process's memory, and a system crash reporter may keep a root-only dump; see `SECURITY.md`.
 
+### Changed
+
+- **`sk2 get` no longer shows notes unless you pass `--notes`.** Notes are treated as secret
+  everywhere else in sk2 — typed at a hidden prompt rather than on the command line, wiped from
+  memory after use — yet `get` printed them on every call, into terminal scrollback, session logs and
+  screen shares. They are now hidden by default, and a credential that has notes says so
+  (`Notes: hidden (run with --notes to show)`), so nothing appears to have gone missing. Nothing
+  stored changes. `--notes` cannot be combined with `--print`. Shell completion offers the new flag
+  in fish, zsh and PowerShell.
+
 ### Fixed
 
 - **`sk2 init` now shows a strength estimate for the master password**, as `change-password` already

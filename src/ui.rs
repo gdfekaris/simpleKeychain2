@@ -90,6 +90,14 @@ pub(crate) fn get_notes(value: &str) {
     println!("     {} {}", "Notes:".yellow().bold(), value.bold());
 }
 
+pub(crate) fn get_notes_hidden() {
+    println!(
+        "     {} {}",
+        "Notes:".yellow().bold(),
+        "hidden (run with --notes to show)".dimmed()
+    );
+}
+
 pub(crate) fn get_updated_at(ts: Option<i64>) {
     let age = match ts {
         None => "unknown".to_string(),

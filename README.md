@@ -204,7 +204,13 @@ The generated password is also copied to your clipboard and cleared after 10 sec
 sk2 get github
 ```
 
-Prints the service name, username, and how long ago the password was last set. If a URL or notes are stored for the credential, they are displayed below the username. The password is copied to your clipboard and automatically cleared after 10 seconds.
+Prints the service name, username, URL (if set), and how long ago the password was last set. The password is copied to your clipboard and automatically cleared after 10 seconds.
+
+Notes are hidden by default, because they often hold recovery codes or security answers and anything printed stays in your scrollback. If a credential has notes, `get` says so (`Notes: hidden (run with --notes to show)`); to see them:
+
+```bash
+sk2 get github --notes
+```
 
 To copy the username to clipboard instead:
 
@@ -218,7 +224,7 @@ On a headless server, or in an SSH session without forwarding, there is no clipb
 sk2 get github --print
 ```
 
-`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. The trade: printed output has no 10-second clear. It stays in your terminal scrollback and any session logs until you clear them, so prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
+`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. The trade: printed output has no 10-second clear. It stays in your terminal scrollback and any session logs until you clear them, so prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead. `--print` cannot be combined with `--notes`. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
 
 If no exact match is found, sk2 falls back to a case-insensitive substring search. A single match is used automatically; multiple matches are shown as a numbered list to pick from.
 

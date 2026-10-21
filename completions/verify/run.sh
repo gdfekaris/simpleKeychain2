@@ -79,6 +79,10 @@ else
     echo "FAIL: need sqlite3 or python3 to build the fixture vault." >&2
     exit 1
 fi
+# The fixture is created under the caller's umask, often 0644 or 0664, and sk2
+# silently ignores a vault other users can read (S3) -- completion would offer
+# nothing and every positive control would abort. A real vault is 0600.
+chmod 600 "$scratch/vault.db"
 
 export SK2_COMP_SCRATCH="$scratch"
 
