@@ -18,6 +18,12 @@ on:
   # 2026-10-20.
   workflow_dispatch:
 
+# Read-only, stated rather than inherited: the repository default is read today,
+# but this keeps it read if that setting ever changes. Same pinning and
+# persist-credentials rules as release.yml -- see the note at the top of it.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ${{ matrix.os }}
@@ -27,13 +33,16 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -61,7 +70,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       # Read the floor from Cargo.toml rather than repeating it here: a hardcoded
       # version would be one more fact stored twice, free to drift.
@@ -69,11 +80,11 @@ jobs:
         id: msrv
         run: echo "version=$(grep '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # Building is the claim under test -- from source is currently the only
       # install path sk2 documents.
@@ -90,12 +101,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
 
       # Prebuilt binary — building cargo-audit from source takes ~3 minutes.
-      - uses: taiki-e/install-action@cargo-audit
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: cargo-audit
 
       # --deny warnings also fails on informational advisories (unsound,
       # unmaintained), not just vulnerabilities. Deliberate for a password

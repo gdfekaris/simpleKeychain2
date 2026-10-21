@@ -4,8 +4,17 @@ The release pipeline has two halves. `release.yml` does the mechanical part: pus
 builds all four targets, attests provenance, and assembles a **draft** release with a `SHA256SUMS`
 file. The maintainer does the part that must not live in CI: signing `SHA256SUMS` with the minisign
 key that never leaves the maintainer's machine, then publishing. Keeping the signature out of CI is
-what makes the two verification mechanisms independent — forging a release would require
-compromising both GitHub Actions *and* the local key.
+what makes the two verification mechanisms independent — tampering with a release *after it was
+built* (swapping an asset, or a stolen account uploading a new one) would require compromising
+both GitHub and the local key.
+
+**Neither mechanism protects against a compromised build.** You sign what the workflow produced,
+after confirming the workflow produced it — and a poisoned build passes that check, attestation
+included, because it really did run in the right workflow. That risk is managed in `release.yml`
+itself, by keeping the build job's privileges minimal: it holds a read-only token, no OIDC
+identity, and no persisted credentials, and every action is pinned to a commit SHA. When updating
+a pin, read the diff between the old and new commit before changing it, as you would a dependency
+bump — a pin that is bumped blindly protects nothing.
 
 ## Preconditions
 

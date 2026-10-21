@@ -9,6 +9,24 @@ backup compatibility — not to a Rust API.
 
 ## [Unreleased]
 
+### Security
+
+- **The release build job no longer holds write access.** `release.yml` granted `contents: write`,
+  plus the OIDC identity used for attestation, to the whole workflow, so the job that compiles sk2 —
+  and so runs every dependency's build script — could have modified the repository or its releases,
+  or attested arbitrary files. That job now holds a read-only token and nothing else; attestation
+  moved to the job that drafts the release, which runs no project code. Every checkout sets
+  `persist-credentials: false`, and every action in both workflows is pinned to a full commit SHA, so
+  a moved tag cannot change what runs. No released artifact is known to be affected.
+
+### Documentation
+
+- **`SECURITY.md` and `RELEASING.md` no longer overstate what release verification proves.** They
+  said forging a release would require compromising both GitHub Actions *and* the maintainer's key.
+  That holds for tampering after the build, not for a compromised build: the maintainer signs what
+  the workflow produced, and a poisoned build would pass every check, attestation included. Both
+  documents now say so and describe how the workflow limits that risk instead.
+
 ## [1.3.1] — 2026-10-20
 
 ### Fixed

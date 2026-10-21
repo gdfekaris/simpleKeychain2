@@ -6,11 +6,25 @@ name: Release
 # provenance, and assembles a DRAFT release with a SHA256SUMS file.
 #
 # Publishing is deliberately manual. The checksum signature is made on the
-# maintainer's machine with a key that never touches GitHub, so the two
-# verification mechanisms stay independent: forging a release would require
-# compromising both this workflow AND the maintainer's key. The maintainer
-# downloads SHA256SUMS from the draft, signs it, uploads SHA256SUMS.minisig,
-# and publishes. Steps in RELEASING.md.
+# maintainer's machine with a key that never touches GitHub, so tampering
+# with the release AFTER this workflow has run -- swapped assets, a stolen
+# account uploading new ones -- would require the maintainer's key as well.
+# The maintainer downloads SHA256SUMS from the draft, signs it, uploads
+# SHA256SUMS.minisig, and publishes. Steps in RELEASING.md.
+#
+# What the signature does NOT cover is a compromise of the build itself. The
+# maintainer signs what this workflow produced, after checking it was this
+# workflow that produced it; a poisoned build passes that check. So the job
+# that runs the build -- which executes every dependency's build script --
+# holds as little as possible:
+#
+#   * build:         contents: read only. No write token, no OIDC.
+#   * draft-release: attests, checksums and drafts. Runs no project code.
+#
+# Every checkout sets persist-credentials: false (otherwise the token is left
+# in .git/config for anything that runs later in the job), and every action
+# is pinned to a full commit SHA with its version in a trailing comment, so a
+# moved tag cannot change what runs here.
 #
 # Code quality is not gated here -- CI already ran on the commit being tagged.
 # RELEASING.md makes checking that a precondition of tagging.
@@ -24,15 +38,15 @@ on:
   # are skipped -- nothing is published.
   workflow_dispatch:
 
-permissions:
-  contents: write # create the draft release and upload assets
-  id-token: write # mint the OIDC identity that signs the attestation
-  attestations: write # store the provenance attestation
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
 
 jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # check out the code -- nothing else
     strategy:
       # If any target fails, stop the whole release rather than drafting a
       # partial one.
@@ -53,7 +67,9 @@ jobs:
             target: x86_64-pc-windows-msvc
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       # A tag that disagrees with Cargo.toml would publish artifacts whose
       # --version output contradicts their filename. Refuse early, on every
@@ -69,8 +85,9 @@ jobs:
             exit 1
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Install musl toolchain
@@ -102,17 +119,9 @@ jobs:
             tar czf "$dir.tar.gz" "$dir"
           fi
 
-      # Attest the archive itself -- the file users download and verify --
-      # not the bare binary inside it.
-      - name: Attest build provenance
-        if: github.event_name == 'push'
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            sk2-*.tar.gz
-            sk2-*.zip
-
-      - uses: actions/upload-artifact@v4
+      # Attestation happens in draft-release, not here: an OIDC token in this
+      # job would be within reach of every dependency's build script.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sk2-${{ matrix.target }}
           path: |
@@ -125,15 +134,33 @@ jobs:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release and upload assets
+      id-token: write # mint the OIDC identity that signs the attestation
+      attestations: write # store the provenance attestation
 
     steps:
-      # gh infers the repository from the checkout.
-      - uses: actions/checkout@v5
+      # gh infers the repository from the checkout's remote; it authenticates
+      # with GH_TOKEN below, so the checkout itself keeps no credentials.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
+
+      # Attest the archives themselves -- the files users download and verify,
+      # not the bare binaries inside them. Before SHA256SUMS exists, so the
+      # glob cannot pick it up. The provenance still names this workflow at
+      # this tag, which is what `gh attestation verify` checks.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/sk2-*.tar.gz
+            dist/sk2-*.zip
 
       # One SHA256SUMS over every archive, generated where all of them are in
       # one place. This is the file the maintainer signs locally.

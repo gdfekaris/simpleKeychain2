@@ -189,6 +189,13 @@ machine, so a compromise of CI cannot reach it at all.
 ### What verification does not prove
 
 Both mechanisms establish *where the bytes came from*, not that the code is free of defects.
+
+Nor do they guard against a compromised build. Both vouch for what the release workflow produced, so
+if a dependency or a build tool were subverted *during* the build, the result would still verify.
+What they rule out is tampering afterwards — a swapped download, or someone who gained control of the
+repository uploading a binary of their own. The release workflow is set up to make a compromised
+build harder: the job that compiles the code holds only read access to the repository, and every
+third-party component it uses is pinned to an exact, reviewed version.
 Platform code-signing is a separate, unrelated system: sk2 binaries are **not** Apple-notarized or
 Windows-Authenticode-signed (both are paid programs), so macOS Gatekeeper and Windows SmartScreen
 will warn on first run even for a fully verified download. On macOS:
