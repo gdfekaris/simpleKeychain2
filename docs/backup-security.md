@@ -13,10 +13,14 @@ Decrypting to RAM avoids writing plaintext to a physical disk where it could be 
 Linux (`/tmp` is usually a tmpfs — confirm with `df -T /tmp` before relying on it):
 
 ```
-gpg -d sk2-export.csv.gpg > /tmp/credentials.csv
+d=$(mktemp -d)          # a private 0700 directory, so other users cannot read the CSV
+gpg -d sk2-export.csv.gpg > "$d/credentials.csv"
 # use the file, then:
-shred -u /tmp/credentials.csv
+shred -u "$d/credentials.csv" && rmdir "$d"
 ```
+
+Do not write to a fixed name directly in `/tmp`: other users can see and often read it there, and a
+file they created first at that name would receive your plaintext.
 
 macOS: `/tmp` is ordinary disk, not a RAM-backed filesystem, so the command above buys you nothing there. Either prefer SK2B, or create an actual RAM disk first:
 
@@ -69,10 +73,13 @@ sk2 export -o E:\sk2-export.sk2backup             # Windows
 After exporting, confirm you can restore it before relying on it. For SK2B, do a dry run against a throwaway vault:
 
 ```
-SK2_VAULT=/tmp/verify.db sk2 init
-SK2_VAULT=/tmp/verify.db sk2 import sk2-export.sk2backup
-rm /tmp/verify.db
+d=$(mktemp -d)
+sk2 --vault "$d/verify.db" init
+sk2 --vault "$d/verify.db" import sk2-export.sk2backup
+rm -r "$d"
 ```
+
+(sk2 refuses a vault directly in `/tmp`, since any user can write there.)
 
 For GPG:
 

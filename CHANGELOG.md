@@ -28,6 +28,17 @@ backup compatibility — not to a Rust API.
   clear remnants left by earlier versions. That cleans the vault *file*; as with any secure
   deletion, copy-on-write filesystems and SSD wear-levelling may still hold old blocks.
 
+- **sk2 refuses a vault other users could read or replace.** sk2 creates its own files owner-only,
+  but never checked a vault it did not create: `--vault` or `SK2_VAULT` pointing at a file another
+  user had pre-created world-writable got initialized into, and stayed world-writable. On Linux and
+  macOS sk2 now checks before opening a vault, as ssh does with its keys, and stops with an error if
+  the file belongs to another user, if group or other has any access to it, or if its directory is
+  writable by anyone else — which rules out keeping a vault directly in `/tmp`, where another user
+  could swap the file or plant a journal that SQLite would roll into it. Nothing is changed for you:
+  for a loose mode on your own file the error gives the `chmod 600` to run. A vault created by any
+  release of sk2 in its default location already passes. The docs no longer suggest `/tmp/…` paths
+  for scratch vaults or decrypted CSVs; they use `mktemp -d`.
+
 ### Documentation
 
 - **`SECURITY.md` and `RELEASING.md` no longer overstate what release verification proves.** They

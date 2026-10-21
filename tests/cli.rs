@@ -42,6 +42,14 @@ impl Scratch {
         let dir = std::env::temp_dir().join(format!("sk2-it-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
+        // Set explicitly rather than trusting the runner's umask: sk2 refuses a vault
+        // in a directory other users can write (S3).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+                .expect("make scratch dir private");
+        }
         Scratch(dir)
     }
 
@@ -223,8 +231,25 @@ impl Session {
 
     fn finish(mut self) -> Outcome {
         let deadline = Instant::now() + TIMEOUT;
-        while Instant::now() < deadline && self.pump(Duration::from_millis(200)) {}
+        let mut eof = false;
+        while Instant::now() < deadline {
+            if !self.pump(Duration::from_millis(200)) {
+                eof = true;
+                break;
+            }
+        }
 
+        // A child that never closed the terminal by the deadline is almost always
+        // sitting at a prompt the test did not expect — a blocking waitpid would hang
+        // the suite on it forever instead of failing. Kill it, and say so. Only on a
+        // timeout: after EOF the child is exiting, just perhaps not yet reaped, and a
+        // WNOHANG probe there would kill a process on its way to exit 0.
+        if !eof {
+            // SAFETY: signalling our own child.
+            unsafe { libc::kill(self.pid, libc::SIGKILL) };
+            self.output
+                .push_str("\n[harness: child still running at the deadline; killed]\n");
+        }
         let mut status: libc::c_int = 0;
         // SAFETY: waiting on our own child.
         unsafe { libc::waitpid(self.pid, &mut status, 0) };
@@ -337,6 +362,28 @@ fn init_refuses_to_clobber_an_existing_vault() {
         .finish()
         .assert_failed()
         .assert_says("already initialized");
+}
+
+/// S3: a vault file someone else could read — here pre-created `0666`, as another
+/// user could do in a shared directory — is refused before any prompt, and left
+/// exactly as it was rather than initialized into.
+#[test]
+fn init_refuses_a_vault_file_other_users_can_access() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("exposed");
+    let v = s.vault();
+    std::fs::write(&v, b"").unwrap();
+    std::fs::set_permissions(&v, std::fs::Permissions::from_mode(0o666)).unwrap();
+
+    sk2(&["--vault", &v, "init"])
+        .finish()
+        .assert_failed()
+        .assert_says("accessible to other users")
+        .assert_silent_about("Master password");
+
+    let meta = std::fs::metadata(&v).unwrap();
+    assert_eq!(meta.len(), 0, "the file must not have been initialized");
+    assert_eq!(meta.permissions().mode() & 0o777, 0o666);
 }
 
 /// `edit` shows the stored username in brackets, which proves the value survived a

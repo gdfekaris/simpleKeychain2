@@ -70,6 +70,120 @@ fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
     path
 }
 
+/// Refuse a vault that another local user could read or replace (S3).
+///
+/// sk2 creates its own files owner-only, but `--vault` and `SK2_VAULT` can point at
+/// a file someone else created, or into a directory someone else can write. Both
+/// are checked, ssh-style, before SQLite touches anything:
+///
+/// * **The directory** must belong to us (or root) and be writable by nobody else.
+///   Anyone who can write it can swap the vault for one of their own — or plant a
+///   `vault.db-journal`, which SQLite treats as a hot journal and rolls into the
+///   vault on the next open. That rules out `/tmp`, sticky bit or not.
+/// * **The file**, if it exists, must be a regular file we own, with no group or
+///   other access. Read access alone is enough for an offline attack (RT-1).
+///
+/// Symlinks are resolved first, so the checks apply to the file and directory
+/// SQLite will actually use. Once the directory is known to be ours alone, nobody
+/// else can change what the path names between this check and the open — short of
+/// writing a directory further up, which is not checked (ssh walks to `$HOME`).
+///
+/// This refuses rather than repairs: a `chmod` cannot fix ownership, and silently
+/// tightening a file the user deliberately shared would hide the problem.
+#[cfg(unix)]
+fn check_vault_access(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let euid = unsafe { libc::geteuid() };
+
+    let real = match std::fs::canonicalize(path) {
+        Ok(real) => Some(real),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if path.symlink_metadata().is_ok() {
+                return Err(format!(
+                    "Vault path {} is a symlink to nothing. Point --vault at the real file.",
+                    path.display()
+                ));
+            }
+            None
+        }
+        Err(e) => return Err(format!("Cannot access vault {}: {e}", path.display())),
+    };
+
+    let dir = match &real {
+        Some(real) => real.parent().map(std::path::Path::to_path_buf),
+        None => path.parent().map(|p| {
+            if p.as_os_str().is_empty() {
+                std::path::PathBuf::from(".")
+            } else {
+                p.to_path_buf()
+            }
+        }),
+    }
+    .unwrap_or_else(|| std::path::PathBuf::from("/"));
+    let dir_meta = std::fs::metadata(&dir)
+        .map_err(|e| format!("Cannot access vault directory {}: {e}", dir.display()))?;
+    if let Some(problem) = vault_dir_problem(dir_meta.mode(), dir_meta.uid(), euid) {
+        return Err(format!(
+            "Vault directory {} {problem}, so they could replace the vault. \
+             Keep the vault in a directory only you can write to.",
+            dir.display()
+        ));
+    }
+
+    if let Some(real) = real {
+        let meta = std::fs::metadata(&real)
+            .map_err(|e| format!("Cannot access vault {}: {e}", real.display()))?;
+        let shown = real.display().to_string();
+        if let Some(problem) =
+            vault_file_problem(meta.is_file(), meta.mode(), meta.uid(), euid, &shown)
+        {
+            return Err(problem);
+        }
+    }
+    Ok(())
+}
+
+/// Why a vault directory with this mode and owner is unsafe, if it is.
+#[cfg(unix)]
+fn vault_dir_problem(mode: u32, uid: u32, euid: u32) -> Option<String> {
+    if uid != euid && uid != 0 {
+        Some(format!("belongs to another user (uid {uid})"))
+    } else if mode & 0o022 != 0 {
+        Some(format!(
+            "is writable by other users (mode {:o})",
+            mode & 0o7777
+        ))
+    } else {
+        None
+    }
+}
+
+/// Why a vault file with this type, mode and owner is unsafe, if it is. `shown`
+/// is the path as the error message should name it.
+#[cfg(unix)]
+fn vault_file_problem(
+    is_file: bool,
+    mode: u32,
+    uid: u32,
+    euid: u32,
+    shown: &str,
+) -> Option<String> {
+    if !is_file {
+        Some(format!("Vault {shown} is not a regular file."))
+    } else if uid != euid {
+        Some(format!(
+            "Vault {shown} belongs to another user (uid {uid}). sk2 only opens a vault you own."
+        ))
+    } else if mode & 0o077 != 0 {
+        Some(format!(
+            "Vault {shown} is accessible to other users (mode {:o}). To fix: chmod 600 {shown}",
+            mode & 0o7777
+        ))
+    } else {
+        None
+    }
+}
+
 /// Resolve the vault path *without* touching the filesystem.
 ///
 /// `vault_path` is not usable for shell completion: it calls `ensure_dir`, so a Tab
@@ -116,6 +230,12 @@ fn list_services_for_completion(cli_override: Option<&str>) -> process::ExitCode
         return process::ExitCode::SUCCESS;
     };
     if !path.is_file() {
+        return process::ExitCode::SUCCESS;
+    }
+    // A vault `run()` would refuse is not one to read names from either. Silent, per
+    // the rules above.
+    #[cfg(unix)]
+    if check_vault_access(&path).is_err() {
         return process::ExitCode::SUCCESS;
     }
     let Ok(conn) = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -513,6 +633,8 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 
     let db_path = vault_path(vault_arg.as_deref());
+    #[cfg(unix)]
+    check_vault_access(&db_path)?;
     let conn = Connection::open(&db_path).expect("Failed to open database");
     db::init_db(&conn);
 
@@ -1084,5 +1206,119 @@ mod tests {
             "sk2-export.sk2backup"
         );
         assert_eq!(default_output_for(ExportFormat::Gpg), "sk2-export.csv.gpg");
+    }
+
+    // -- check_vault_access (S3) --
+
+    #[cfg(unix)]
+    const ME: u32 = 1000;
+
+    #[cfg(unix)]
+    #[test]
+    fn private_vault_file_is_accepted() {
+        assert_eq!(vault_file_problem(true, 0o100600, ME, ME, "v"), None);
+        assert_eq!(vault_file_problem(true, 0o100400, ME, ME, "v"), None);
+    }
+
+    /// Any group or other bit, read included: a readable vault is an offline attack.
+    #[cfg(unix)]
+    #[test]
+    fn vault_file_with_any_group_or_other_access_is_refused() {
+        for mode in [0o100666, 0o100644, 0o100640, 0o100604, 0o100610, 0o100601] {
+            let err = vault_file_problem(true, mode, ME, ME, "v").expect("refused");
+            assert!(err.contains("chmod 600 v"), "mode {mode:o}: {err}");
+        }
+    }
+
+    /// Unreachable through the filesystem without root, hence the pure helper.
+    #[cfg(unix)]
+    #[test]
+    fn vault_file_owned_by_someone_else_is_refused_even_if_private() {
+        let err = vault_file_problem(true, 0o100600, 1001, ME, "v").expect("refused");
+        assert!(err.contains("another user (uid 1001)"), "got: {err}");
+        assert!(vault_file_problem(true, 0o100600, 0, ME, "v").is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vault_that_is_not_a_regular_file_is_refused() {
+        assert!(vault_file_problem(false, 0o040700, ME, ME, "v").is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vault_directory_rules() {
+        assert_eq!(vault_dir_problem(0o040700, ME, ME), None);
+        assert_eq!(vault_dir_problem(0o040755, ME, ME), None);
+        assert_eq!(
+            vault_dir_problem(0o040755, 0, ME),
+            None,
+            "root-owned is fine"
+        );
+        // The sticky bit does not help: other users can still create the journal.
+        for mode in [0o041777, 0o040777, 0o040770, 0o040702] {
+            assert!(vault_dir_problem(mode, ME, ME).is_some(), "mode {mode:o}");
+        }
+        assert!(vault_dir_problem(0o040700, 1001, ME).is_some());
+    }
+
+    /// The real filesystem path, symlink resolution included.
+    #[cfg(unix)]
+    #[test]
+    fn check_vault_access_on_the_filesystem() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let mode = |p: &std::path::Path, m| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+        };
+        let dir = std::env::temp_dir().join(format!("sk2-access-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        mode(&dir, 0o700);
+
+        let vault = dir.join("vault.db");
+        assert!(
+            check_vault_access(&vault).is_ok(),
+            "missing file in a private dir"
+        );
+
+        std::fs::write(&vault, b"").unwrap();
+        mode(&vault, 0o600);
+        assert!(check_vault_access(&vault).is_ok());
+        mode(&vault, 0o666);
+        assert!(
+            check_vault_access(&vault)
+                .unwrap_err()
+                .contains("accessible to other users")
+        );
+
+        // A private-looking symlink to an exposed file is judged by the file.
+        let link = dir.join("link.db");
+        symlink(&vault, &link).unwrap();
+        assert!(
+            check_vault_access(&link)
+                .unwrap_err()
+                .contains("accessible to other users")
+        );
+        mode(&vault, 0o600);
+        assert!(check_vault_access(&link).is_ok());
+
+        let dangling = dir.join("dangling.db");
+        symlink(dir.join("nowhere/v.db"), &dangling).unwrap();
+        assert!(
+            check_vault_access(&dangling)
+                .unwrap_err()
+                .contains("symlink to nothing")
+        );
+
+        let shared = dir.join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        mode(&shared, 0o1777);
+        let err = check_vault_access(&shared.join("vault.db")).unwrap_err();
+        assert!(
+            err.contains("writable by other users (mode 1777)"),
+            "got: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

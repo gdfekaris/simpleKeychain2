@@ -16,8 +16,9 @@ That channel is private between you and the maintainer until an advisory is publ
 
 Useful things to include: the version or commit, your operating system, what you expected, what
 happened instead, and the smallest set of steps that reproduces it. If a proof of concept touches a
-real vault, please reproduce it against a scratch vault instead — `sk2 --vault /tmp/scratch.db …`
-keeps your own credentials out of it.
+real vault, please reproduce it against a scratch vault instead — `d=$(mktemp -d)` and then
+`sk2 --vault "$d/scratch.db" …` keeps your own credentials out of it. (A vault directly in `/tmp`
+is refused; see below.)
 
 ### What to expect
 
@@ -58,7 +59,11 @@ by default `~/.sk2/vault.db`.
 - **Offline access to a backup file.** `.sk2backup` files are independently encrypted under a
   passphrase you choose at export time.
 - **Other local users on a Unix machine.** The vault directory is created `0700` and files `0600`,
-  established at creation time so there is no window in which a new file is world-readable.
+  established at creation time so there is no window in which a new file is world-readable. A vault
+  sk2 did not create is checked before it is opened: sk2 refuses one owned by another user or
+  readable or writable by group or other, and one in a directory anyone else can write — such as
+  `/tmp` — where another user could replace the vault or plant a journal file SQLite would roll
+  into it.
 - **Undetected tampering.** Both formats are authenticated; modified ciphertext fails to decrypt
   rather than yielding garbage. `sk2 verify` checks every entry and exits non-zero if any fails.
 
@@ -101,7 +106,8 @@ These are deliberate trade-offs or accepted gaps, documented so you can judge th
   `--no-default-features --features export,import`, which drops both the `completions` subcommand
   and the `--list-services` flag.
 - **Windows has no equivalent file-permission hardening.** The `umask` and `0600` modes described
-  above are Unix-only. On Windows, the vault and backup files inherit default ACLs.
+  above are Unix-only, as is the ownership and permission check on an existing vault. On Windows,
+  the vault and backup files inherit default ACLs.
 - **In-memory secret handling is best-effort.** Secrets are held in wrappers that wipe on drop,
   including on error paths and panics. That now covers the credential struct and the JSON buffers
   used inside encryption and decryption, which were previously left unwiped. It is still not a
