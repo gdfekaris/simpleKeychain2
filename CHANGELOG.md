@@ -45,6 +45,14 @@ backup compatibility — not to a Rust API.
   has no effect. The docs no longer suggest `/tmp/…` paths for scratch vaults or decrypted CSVs; they
   use `mktemp -d`.
 
+### Fixed
+
+- **`sk2 init` now shows a strength estimate for the master password**, as `change-password` already
+  did and as `SECURITY.md` said it would. Like every strength estimate in sk2 it is advice only and
+  never rejects your choice. The estimate counts character classes and length, not dictionary words
+  or common patterns, so it overrates passwords like `Password1!`; treat a high score as a floor,
+  not a guarantee.
+
 ### Documentation
 
 - **`SECURITY.md` and `RELEASING.md` no longer overstate what release verification proves.** They

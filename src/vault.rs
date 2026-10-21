@@ -59,6 +59,7 @@ pub(crate) fn init_vault(conn: &Connection) -> Result<(), String> {
     if password.is_empty() {
         return Err("Password cannot be empty.".into());
     }
+    ui::password_strength(crypto::password_entropy(&password));
 
     ui::password_prompt("Confirm master password: ");
     let confirm = Zeroizing::new(rpassword::read_password().expect("Failed to read password"));

@@ -303,6 +303,8 @@ fn strip_ansi(s: &str) -> String {
 fn init_vault(vault: &str) {
     sk2(&["--vault", vault, "init"])
         .answer("set master password", MASTER)
+        // Shown before the confirmation, as `change-password` does (S5).
+        .expect("strength:")
         .answer("confirm master password", MASTER)
         .finish()
         .assert_ok()
