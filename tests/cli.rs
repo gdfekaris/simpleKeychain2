@@ -132,6 +132,24 @@ struct Session {
     pid: libc::pid_t,
     output: String,
     cursor: usize,
+    /// Set by `finish`. Until then `Drop` owns the child.
+    reaped: bool,
+}
+
+/// A test that panics mid-session never reaches `finish`, and its child would sit
+/// at a prompt on a dead terminal indefinitely — eight such orphans were found
+/// still running on 2026-10-21. Kill and reap it instead.
+impl Drop for Session {
+    fn drop(&mut self) {
+        if !self.reaped {
+            // SAFETY: signalling, reaping and closing what this session owns.
+            unsafe {
+                libc::kill(self.pid, libc::SIGKILL);
+                libc::waitpid(self.pid, std::ptr::null_mut(), 0);
+                libc::close(self.fd);
+            }
+        }
+    }
 }
 
 /// Spawn `sk2 <args>` attached to a fresh PTY.
@@ -176,6 +194,7 @@ fn spawn_at(binary: &str, args: &[&str]) -> Session {
         pid,
         output: String::new(),
         cursor: 0,
+        reaped: false,
     }
 }
 
@@ -270,6 +289,7 @@ impl Session {
         };
         // SAFETY: fd is open and owned by this session.
         unsafe { libc::close(self.fd) };
+        self.reaped = true;
 
         Outcome {
             code,
@@ -477,6 +497,50 @@ fn a_refused_vault_opens_again_after_the_suggested_fix() {
     std::fs::rename(&path, &moved).unwrap();
     get_print(&moved);
     verify(&moved, MASTER).assert_ok();
+}
+
+/// S6: while sk2 waits at a prompt — the state in which it holds secrets — another
+/// process running as the same user cannot read its memory or environment through
+/// `/proc`, and it cannot dump core. The test process plays that other process. It
+/// is sk2's parent, which Yama's default `ptrace_scope` 1 would still allow, so a
+/// refusal here comes from sk2 itself.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_waiting_sk2_cannot_be_read_by_other_processes() {
+    let s = Scratch::new("hardened");
+    let v = s.vault();
+
+    let session = sk2(&["--vault", &v, "init"]).expect("set master password");
+    let proc_dir = format!("/proc/{}", session.pid);
+
+    for file in ["mem", "environ"] {
+        let err = std::fs::File::open(format!("{proc_dir}/{file}"))
+            .expect_err(&format!("/proc/<pid>/{file} must not be readable"));
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "{file}: {err}"
+        );
+    }
+
+    let limits = std::fs::read_to_string(format!("{proc_dir}/limits")).unwrap();
+    let core = limits
+        .lines()
+        .find(|l| l.starts_with("Max core file size"))
+        .expect("core limit line");
+    let fields: Vec<&str> = core.split_whitespace().collect();
+    assert_eq!(
+        &fields[4..6],
+        ["0", "0"],
+        "soft and hard core limit: {core}"
+    );
+
+    session
+        .send(MASTER)
+        .answer("confirm master password", MASTER)
+        .finish()
+        .assert_ok()
+        .assert_says("Vault initialized");
 }
 
 /// `edit` shows the stored username in brackets, which proves the value survived a

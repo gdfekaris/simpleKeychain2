@@ -1091,7 +1091,43 @@ fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
+/// Keep the derived key out of core dumps and away from other processes (S6).
+///
+/// The key stays resident while sk2 waits on a prompt — `add`'s username,
+/// `export`'s "yes" — so a crash or a Ctrl+\ there could write it to disk, and any
+/// process running as the same user could read it out of `/proc/<pid>/mem`.
+///
+/// * `PR_SET_DUMPABLE 0` (Linux) is the one that matters. It refuses `ptrace` and
+///   `/proc/<pid>/mem` to same-user processes, and stops core dumps — including
+///   piped ones (apport, systemd-coredump), which ignore `RLIMIT_CORE`. Where
+///   `fs.suid_dumpable` is 2, the Ubuntu default, a crash is still handed to that
+///   handler but written readable by root only. A process can always read its own
+///   `/proc/self`, so `current_exe()` for the clipboard child still works.
+/// * `RLIMIT_CORE 0` covers what that does not: file-pattern core dumps, macOS
+///   (which has no `PR_SET_DUMPABLE`), and the `gpg` children, which inherit the
+///   limit — the dumpable flag does not survive `exec`.
+///
+/// Best-effort and silent: completion must never write to stderr, and neither
+/// call fails in practice on a supported platform.
+#[cfg(unix)]
+fn harden_process() {
+    let no_core = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: plain syscalls on this process with valid arguments.
+    unsafe {
+        libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+        #[cfg(target_os = "linux")]
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+    }
+}
+
 fn main() -> process::ExitCode {
+    // Before anything else, so no secret ever exists in a dumpable process.
+    #[cfg(unix)]
+    harden_process();
+
     // Process-wide umask: every file/dir we create inherits 0o600/0o700.
     // Defense in depth for paths we don't explicitly open with mode().
     #[cfg(unix)]

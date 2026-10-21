@@ -45,6 +45,13 @@ backup compatibility — not to a Rust API.
   has no effect. The docs no longer suggest `/tmp/…` paths for scratch vaults or decrypted CSVs; they
   use `mktemp -d`.
 
+- **Other processes can no longer read sk2's memory, and a crash no longer dumps it.** While sk2
+  waits at a prompt it holds the key derived from your master password, and until now any process
+  running as you could read it through `/proc/<pid>/mem` (verified before the fix), and a crash or Ctrl+\\ at that point could write it to a core file. On Linux sk2
+  now marks itself non-dumpable at startup, which blocks both, and it sets the core-file limit to
+  zero, which also covers macOS and the `gpg` processes sk2 starts. Root can still read any
+  process's memory, and a system crash reporter may keep a root-only dump; see `SECURITY.md`.
+
 ### Fixed
 
 - **`sk2 init` now shows a strength estimate for the master password**, as `change-password` already

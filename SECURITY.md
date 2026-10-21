@@ -113,13 +113,22 @@ These are deliberate trade-offs or accepted gaps, documented so you can judge th
   used inside encryption and decryption, which were previously left unwiped. It is still not a
   guarantee: a wrapper wipes only the allocation it holds at the moment it drops, so it cannot
   reach a copy left behind when a buffer grew and moved, nor scratch allocations inside
-  third-party parsers. A memory dump, a swap file, or a hibernation image could therefore still
-  contain plaintext.
+  third-party parsers. A swap file or a hibernation image could therefore still contain plaintext,
+  since sk2 does not lock its memory.
+- **Core dumps and other processes reading sk2's memory are blocked, with limits.** On Linux, sk2
+  marks itself non-dumpable at startup, so another process running as you cannot attach to it or
+  read its memory through `/proc` while it waits at a prompt holding your key, and a crash does not
+  write a core file you or other users can read. On systems where crashes go to a crash reporter
+  with `fs.suid_dumpable = 2` (Ubuntu's default), the reporter may still keep a crash dump readable
+  only by root. On macOS sk2 only disables core files; it does not block debugger attachment. Root
+  can read any process's memory regardless, and Windows has none of this.
 - **Clipboard contents are cleared unconditionally after 10 seconds,** not selectively. Whatever is
   on the clipboard at that moment is wiped, including something you copied yourself in the interim.
   Clipboard managers may also retain history that sk2 cannot reach.
-- **The `--vault` flag and `SK2_VAULT` variable accept any path.** sk2 does not check whether the
-  path is a symlink before SQLite opens it.
+- **The `--vault` flag and `SK2_VAULT` variable accept any path,** but on Linux and macOS the file
+  they name is checked before it is opened (see *Other local users* above). Symlinks are followed
+  and the real file and its directory are what get checked. Directories further up the path are not
+  checked, so a vault under a directory another user can rename is not protected by this.
 - **GPG backups depend on your GPG installation** for their encryption and passphrase handling. The
   `.sk2backup` format is self-contained and uses a stronger KDF; prefer it for new backups.
 
