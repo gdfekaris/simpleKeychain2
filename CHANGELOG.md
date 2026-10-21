@@ -19,6 +19,15 @@ backup compatibility — not to a Rust API.
   `persist-credentials: false`, and every action in both workflows is pinned to a full commit SHA, so
   a moved tag cannot change what runs. No released artifact is known to be affected.
 
+- **Deleted credentials no longer linger in the vault file.** SQLite does not overwrite freed space
+  by default, so `sk2 delete` removed an entry from the vault's index while its ciphertext stayed
+  in `vault.db` — still decryptable by anyone holding the file and the current master password. An
+  `edit` that grew an entry left its previous version behind the same way, so replacing a leaked
+  password did not remove the leaked one. sk2 now enables SQLite's `secure_delete`, which zeroes
+  freed space, and the first time a newer sk2 opens an existing vault it runs a one-time `VACUUM` to
+  clear remnants left by earlier versions. That cleans the vault *file*; as with any secure
+  deletion, copy-on-write filesystems and SSD wear-levelling may still hold old blocks.
+
 ### Documentation
 
 - **`SECURITY.md` and `RELEASING.md` no longer overstate what release verification proves.** They

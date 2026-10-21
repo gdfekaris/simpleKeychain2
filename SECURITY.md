@@ -81,6 +81,12 @@ by default `~/.sk2/vault.db`.
 
 These are deliberate trade-offs or accepted gaps, documented so you can judge them yourself.
 
+- **Deleting an entry removes it from the vault file, not necessarily from the disk.** sk2 zeroes
+  freed space inside `vault.db`. Releases up to and including v1.3.1 did not, and left deleted
+  entries' ciphertext in the file; a later release clears those remnants once, on first open. Copy-on-write filesystems, SSD wear-levelling, backups, and snapshots of the file can
+  still hold earlier versions, which are decryptable with the master password that was current
+  when they were written. If an old master password may be compromised, treat old copies of the
+  vault as compromised too.
 - **Service names are stored in plaintext.** Only the credential contents are encrypted. Anyone with
   read access to `vault.db` can see *which* services you have accounts with, though not the
   credentials. This is a queryability trade-off.

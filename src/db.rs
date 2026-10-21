@@ -11,7 +11,20 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
+/// `PRAGMA user_version` once existing vaults have been scrubbed of freed data (S2).
+const SCRUBBED_VERSION: i64 = 1;
+
 pub(crate) fn init_db(conn: &Connection) {
+    // S2: SQLite does not overwrite freed space by default, so a deleted credential's
+    // ciphertext stayed in vault.db (still decryptable under the current key), as did
+    // the old version of any row that changed size on `edit`. `secure_delete` zeroes
+    // freed content from now on. Per connection, so it is set on every open.
+    //
+    // `temp_store = MEMORY` keeps SQLite's scratch data -- including the full working
+    // copy `VACUUM` makes below -- off disk, so the cleanup does not leave a fresh copy
+    // of the vault in a deleted temp file.
+    conn.execute_batch("PRAGMA secure_delete = ON; PRAGMA temp_store = MEMORY;")
+        .expect("Failed to configure database");
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS metadata (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -31,6 +44,34 @@ pub(crate) fn init_db(conn: &Connection) {
     .expect("Failed to initialize database");
     // Idempotent migration: add updated_at column if it doesn't exist yet.
     let _ = conn.execute("ALTER TABLE credentials ADD COLUMN updated_at INTEGER", []);
+    scrub_freed_pages_once(conn);
+}
+
+/// One-time `VACUUM` for vaults written before `secure_delete` was on.
+///
+/// `secure_delete` only governs space freed *after* it is enabled; whatever earlier
+/// deletes left behind is already free and stays readable until something rewrites
+/// it. `VACUUM` rebuilds the file from live rows only, which drops those remnants.
+///
+/// Recorded in `user_version` so it runs once per vault rather than on every command.
+/// Best-effort by design: on a read-only vault, or one another process has locked,
+/// `VACUUM` fails, the marker is not written, and the next writable open tries again.
+/// Failing the command over cleanup would be friction buying nothing.
+///
+/// Known limit, the same one `docs/backup-security.md` gives for secure deletion in
+/// general: `VACUUM` writes through SQLite's rollback journal, which is unlinked rather
+/// than wiped, and copy-on-write filesystems or SSD wear-levelling may keep old blocks
+/// regardless. This removes the remnants from the vault file, not from the disk.
+fn scrub_freed_pages_once(conn: &Connection) {
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap_or(SCRUBBED_VERSION);
+    if version >= SCRUBBED_VERSION {
+        return;
+    }
+    if conn.execute_batch("VACUUM").is_ok() {
+        let _ = conn.execute_batch(&format!("PRAGMA user_version = {SCRUBBED_VERSION}"));
+    }
 }
 
 pub(crate) fn is_first_run(conn: &Connection) -> bool {
@@ -762,6 +803,151 @@ mod tests {
         // The original row must survive a failed rename.
         assert!(service_exists(&conn, "old"));
         assert!(!service_exists(&conn, "new"));
+    }
+
+    // -- secure deletion (S2) --
+    //
+    // These need a real file: the question is which bytes remain in it, which an
+    // in-memory database cannot answer.
+
+    /// A vault file removed (with its journal) when the test ends, however it ends.
+    struct ScratchFile(std::path::PathBuf);
+
+    impl ScratchFile {
+        fn new(name: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("sk2-db-test-{}-{name}.db", std::process::id()));
+            let scratch = ScratchFile(path);
+            scratch.remove();
+            scratch
+        }
+
+        fn open(&self) -> Connection {
+            Connection::open(&self.0).unwrap()
+        }
+
+        fn contains(&self, needle: &[u8]) -> bool {
+            std::fs::read(&self.0)
+                .unwrap()
+                .windows(needle.len())
+                .any(|w| w == needle)
+        }
+
+        fn remove(&self) {
+            let _ = std::fs::remove_file(&self.0);
+            let mut journal = self.0.clone().into_os_string();
+            journal.push("-journal");
+            let _ = std::fs::remove_file(journal);
+        }
+    }
+
+    impl Drop for ScratchFile {
+        fn drop(&mut self) {
+            self.remove();
+        }
+    }
+
+    fn ciphertext_of(conn: &Connection, service: &str) -> Vec<u8> {
+        conn.query_row(
+            "SELECT ciphertext FROM credentials WHERE service = ?1",
+            rusqlite::params![service],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn deleted_credential_leaves_no_ciphertext_in_the_file() {
+        let file = ScratchFile::new("delete");
+        let conn = file.open();
+        init_db(&conn);
+        add_credential(&conn, &TEST_KEY, "bank", "me", "hunter2", "", "");
+        add_credential(&conn, &TEST_KEY, "email", "me", "other", "", "");
+        let doomed = ciphertext_of(&conn, "bank");
+
+        assert!(delete_credential(&conn, "bank"));
+        drop(conn);
+
+        assert!(
+            !file.contains(&doomed),
+            "the deleted credential's ciphertext is still in vault.db"
+        );
+    }
+
+    /// An `edit` that grows the row frees the old cell; without secure_delete the
+    /// previous password survived, whole, next to the new one.
+    ///
+    /// The neighbours are load-bearing. With the edited row alone on its page, SQLite
+    /// happens to reuse the space and no remnant is left either way, so a one-row
+    /// version of this test passed with the fix switched off (found by negative
+    /// control, 2026-10-20). Real vaults have neighbours.
+    #[test]
+    fn edited_credential_leaves_no_old_ciphertext_in_the_file() {
+        let file = ScratchFile::new("edit");
+        let conn = file.open();
+        init_db(&conn);
+        add_credential(&conn, &TEST_KEY, "aardvark", "me", "first", "", "");
+        add_credential(&conn, &TEST_KEY, "bank", "me", "leaked-password", "", "");
+        add_credential(&conn, &TEST_KEY, "zebra", "me", "last", "", "");
+        let before = ciphertext_of(&conn, "bank");
+
+        let longer_notes = "recovery codes: ".repeat(40);
+        assert!(update_credential(
+            &conn,
+            &TEST_KEY,
+            "bank",
+            "me",
+            "new-password",
+            &longer_notes,
+            "",
+            true
+        ));
+        drop(conn);
+
+        assert!(
+            !file.contains(&before),
+            "the pre-edit ciphertext is still in vault.db"
+        );
+    }
+
+    /// Remnants written before secure_delete existed are cleared on the next open, once.
+    #[test]
+    fn remnants_from_older_versions_are_scrubbed_once() {
+        let file = ScratchFile::new("legacy");
+
+        // Reproduce a vault written by sk2 <= 1.3.1: secure_delete off, no marker.
+        let conn = file.open();
+        init_db(&conn);
+        conn.execute_batch("PRAGMA secure_delete = OFF; PRAGMA user_version = 0;")
+            .unwrap();
+        add_credential(&conn, &TEST_KEY, "bank", "me", "hunter2", "", "");
+        add_credential(&conn, &TEST_KEY, "email", "me", "other", "", "");
+        let doomed = ciphertext_of(&conn, "bank");
+        assert!(delete_credential(&conn, "bank"));
+        drop(conn);
+        assert!(
+            file.contains(&doomed),
+            "setup must leave a remnant, or this test proves nothing"
+        );
+
+        let conn = file.open();
+        init_db(&conn);
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            version, SCRUBBED_VERSION,
+            "the scrub must record that it ran"
+        );
+        // Live data survives the rebuild.
+        let (u, p, _, _, _) = get_credential(&conn, &TEST_KEY, "email").unwrap().unwrap();
+        assert_eq!((u.as_str(), p.as_str()), ("me", "other"));
+        drop(conn);
+
+        assert!(
+            !file.contains(&doomed),
+            "the old remnant survived the one-time scrub"
+        );
     }
 
     #[test]
