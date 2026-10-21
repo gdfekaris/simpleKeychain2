@@ -122,20 +122,22 @@ fn check_vault_access(path: &std::path::Path) -> Result<(), String> {
     .unwrap_or_else(|| std::path::PathBuf::from("/"));
     let dir_meta = std::fs::metadata(&dir)
         .map_err(|e| format!("Cannot access vault directory {}: {e}", dir.display()))?;
-    if let Some(problem) = vault_dir_problem(dir_meta.mode(), dir_meta.uid(), euid) {
-        return Err(format!(
-            "Vault directory {} {problem}, so they could replace the vault. \
-             Keep the vault in a directory only you can write to.",
-            dir.display()
-        ));
+    let vault_shown = real.as_deref().map(shell_quote);
+    if let Some(problem) = vault_dir_problem(
+        dir_meta.mode(),
+        dir_meta.uid(),
+        euid,
+        &shell_quote(&dir),
+        vault_shown.as_deref(),
+    ) {
+        return Err(problem);
     }
 
-    if let Some(real) = real {
-        let meta = std::fs::metadata(&real)
+    if let (Some(real), Some(shown)) = (&real, &vault_shown) {
+        let meta = std::fs::metadata(real)
             .map_err(|e| format!("Cannot access vault {}: {e}", real.display()))?;
-        let shown = real.display().to_string();
         if let Some(problem) =
-            vault_file_problem(meta.is_file(), meta.mode(), meta.uid(), euid, &shown)
+            vault_file_problem(meta.is_file(), meta.mode(), meta.uid(), euid, shown)
         {
             return Err(problem);
         }
@@ -143,40 +145,90 @@ fn check_vault_access(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Why a vault directory with this mode and owner is unsafe, if it is.
+/// A path as it should appear in a command the user is told to run: bare when
+/// that is unambiguous, single-quoted otherwise, so a copy-paste does the right
+/// thing with spaces or shell metacharacters in the path.
 #[cfg(unix)]
-fn vault_dir_problem(mode: u32, uid: u32, euid: u32) -> Option<String> {
-    if uid != euid && uid != 0 {
-        Some(format!("belongs to another user (uid {uid})"))
-    } else if mode & 0o022 != 0 {
-        Some(format!(
-            "is writable by other users (mode {:o})",
-            mode & 0o7777
-        ))
+fn shell_quote(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    if !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+,:@%".contains(c))
+    {
+        s.into_owned()
     } else {
-        None
+        format!("'{}'", s.replace('\'', r"'\''"))
     }
 }
 
-/// Why a vault file with this type, mode and owner is unsafe, if it is. `shown`
-/// is the path as the error message should name it.
+/// The refusal for an unsafe vault directory, if it is one. `dir` and `vault` are
+/// shell-quoted; `vault` is `None` when the file does not exist yet (`init`).
+///
+/// Every refusal says that nothing was changed and how to fix it, because the
+/// person reading it has just upgraded and found their passwords "gone". The fix
+/// is always a permission change or a move — never re-entering anything, since
+/// nothing in the vault's encryption depends on where the file lives.
+#[cfg(unix)]
+fn vault_dir_problem(
+    mode: u32,
+    uid: u32,
+    euid: u32,
+    dir: &str,
+    vault: Option<&str>,
+) -> Option<String> {
+    let writable = mode & 0o022 != 0;
+    let ours = uid == euid;
+    if (ours || uid == 0) && !writable {
+        return None;
+    }
+    let why = if ours || uid == 0 {
+        format!("is writable by other users (mode {:o})", mode & 0o7777)
+    } else {
+        format!("belongs to another user (uid {uid})")
+    };
+    let fix = if ours {
+        format!("To fix:\n      chmod go-w {dir}")
+    } else if let Some(vault) = vault {
+        format!(
+            "Move it to a directory only you can write to, then use the new path:\n      \
+             mkdir -p -m 700 ~/vaults && mv {vault} ~/vaults/"
+        )
+    } else {
+        "Choose a path in a directory only you can write to, such as\n      \
+         --vault ~/vaults/vault.db\n    \
+         (sk2 creates the directory, private to you)."
+            .to_string()
+    };
+    Some(format!(
+        "Vault directory {dir} {why},\n    \
+         who could replace the vault. sk2 has not opened or changed anything.\n    {fix}"
+    ))
+}
+
+/// The refusal for an unsafe vault file, if it is one. `vault` is shell-quoted.
 #[cfg(unix)]
 fn vault_file_problem(
     is_file: bool,
     mode: u32,
     uid: u32,
     euid: u32,
-    shown: &str,
+    vault: &str,
 ) -> Option<String> {
     if !is_file {
-        Some(format!("Vault {shown} is not a regular file."))
+        Some(format!("Vault {vault} is not a regular file."))
     } else if uid != euid {
         Some(format!(
-            "Vault {shown} belongs to another user (uid {uid}). sk2 only opens a vault you own."
+            "Vault {vault} belongs to another user (uid {uid}), so sk2 will not open it.\n    \
+             It has not been changed. If it is yours (for example, created with sudo):\n      \
+             sudo chown \"$(id -un)\" {vault}"
         ))
     } else if mode & 0o077 != 0 {
         Some(format!(
-            "Vault {shown} is accessible to other users (mode {:o}). To fix: chmod 600 {shown}",
+            "Vault {vault} is accessible to other users (mode {:o}), so sk2 will not open it.\n    \
+             It has not been changed. To fix:\n      \
+             chmod 600 {vault}\n    \
+             If that has no effect, the vault is on a filesystem that ignores permissions\n    \
+             (FAT, exFAT, NTFS, a network share): copy it to a local disk and use the copy.",
             mode & 0o7777
         ))
     } else {
@@ -1226,7 +1278,9 @@ mod tests {
     fn vault_file_with_any_group_or_other_access_is_refused() {
         for mode in [0o100666, 0o100644, 0o100640, 0o100604, 0o100610, 0o100601] {
             let err = vault_file_problem(true, mode, ME, ME, "v").expect("refused");
-            assert!(err.contains("chmod 600 v"), "mode {mode:o}: {err}");
+            assert!(err.contains("chmod 600 v\n"), "mode {mode:o}: {err}");
+            assert!(err.contains("has not been changed"), "mode {mode:o}: {err}");
+            assert!(err.contains("ignores permissions"), "mode {mode:o}: {err}");
         }
     }
 
@@ -1236,6 +1290,7 @@ mod tests {
     fn vault_file_owned_by_someone_else_is_refused_even_if_private() {
         let err = vault_file_problem(true, 0o100600, 1001, ME, "v").expect("refused");
         assert!(err.contains("another user (uid 1001)"), "got: {err}");
+        assert!(err.contains("sudo chown \"$(id -un)\" v"), "got: {err}");
         assert!(vault_file_problem(true, 0o100600, 0, ME, "v").is_some());
     }
 
@@ -1248,18 +1303,55 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn vault_directory_rules() {
-        assert_eq!(vault_dir_problem(0o040700, ME, ME), None);
-        assert_eq!(vault_dir_problem(0o040755, ME, ME), None);
-        assert_eq!(
-            vault_dir_problem(0o040755, 0, ME),
-            None,
-            "root-owned is fine"
-        );
+        let ok = |mode, uid| vault_dir_problem(mode, uid, ME, "d", Some("v")).is_none();
+        assert!(ok(0o040700, ME));
+        assert!(ok(0o040755, ME));
+        assert!(ok(0o040755, 0), "root-owned is fine");
         // The sticky bit does not help: other users can still create the journal.
-        for mode in [0o041777, 0o040777, 0o040770, 0o040702] {
-            assert!(vault_dir_problem(mode, ME, ME).is_some(), "mode {mode:o}");
+        for mode in [0o041777, 0o040777, 0o040775, 0o040770, 0o040702] {
+            assert!(!ok(mode, ME), "mode {mode:o}");
+            assert!(!ok(mode, 0), "root, mode {mode:o}");
         }
-        assert!(vault_dir_problem(0o040700, 1001, ME).is_some());
+        assert!(!ok(0o040700, 1001));
+    }
+
+    /// The fix offered depends on whose directory it is: ours can be tightened,
+    /// anyone else's (including root's `/tmp`) can only be left.
+    #[cfg(unix)]
+    #[test]
+    fn vault_directory_refusals_name_a_fix_that_applies() {
+        let ours = vault_dir_problem(0o040775, ME, ME, "d", Some("v")).unwrap();
+        assert!(ours.contains("chmod go-w d"), "got: {ours}");
+
+        let tmp = vault_dir_problem(0o041777, 0, ME, "/tmp", Some("/tmp/v.db")).unwrap();
+        assert!(tmp.contains("mv /tmp/v.db ~/vaults/"), "got: {tmp}");
+        assert!(!tmp.contains("chmod"), "never suggest chmod on /tmp: {tmp}");
+
+        let theirs = vault_dir_problem(0o040755, 1001, ME, "d", Some("v")).unwrap();
+        assert!(theirs.contains("another user (uid 1001)"), "got: {theirs}");
+        assert!(theirs.contains("mv v ~/vaults/"), "got: {theirs}");
+
+        // `init`: there is no vault to move yet.
+        let fresh = vault_dir_problem(0o041777, 0, ME, "/tmp", None).unwrap();
+        assert!(fresh.contains("--vault ~/vaults/vault.db"), "got: {fresh}");
+
+        for msg in [ours, tmp, theirs, fresh] {
+            assert!(
+                msg.contains("has not opened or changed anything"),
+                "got: {msg}"
+            );
+        }
+    }
+
+    /// The suggested commands are meant to be pasted, so paths must survive a shell.
+    #[cfg(unix)]
+    #[test]
+    fn suggested_paths_are_shell_quoted_when_needed() {
+        let q = |p: &str| shell_quote(std::path::Path::new(p));
+        assert_eq!(q("/home/u/.sk2/vault.db"), "/home/u/.sk2/vault.db");
+        assert_eq!(q("/home/u/My Vaults/v.db"), "'/home/u/My Vaults/v.db'");
+        assert_eq!(q("/x/it's.db"), r"'/x/it'\''s.db'");
+        assert_eq!(q("/x/$(rm -rf ~).db"), "'/x/$(rm -rf ~).db'");
     }
 
     /// The real filesystem path, symlink resolution included.

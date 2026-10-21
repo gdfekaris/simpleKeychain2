@@ -335,6 +335,24 @@ SK2_VAULT=~/vaults/work.db sk2 list
 
 Use this for separate work and personal vaults, for scripting, or for a non-standard home directory. Parent directories are created automatically.
 
+### If sk2 refuses to open your vault
+
+On Linux and macOS, sk2 will not open a vault that another user could read or replace (the same rule ssh applies to your keys). A vault sk2 created in its default location always passes. One that was copied, downloaded, synced, restored or placed somewhere shared may not.
+
+**Nothing is lost, and you never need to re-enter a password.** sk2 refuses before it opens the file, so the vault is untouched. Every fix below is a permission change or a move of that one file. The vault's encryption does not depend on where the file lives, so afterwards it opens with the same master password and every entry intact. The error message names the fix for your case and prints the command to run:
+
+| The error says | Usually because | Fix |
+|---|---|---|
+| *Vault … is accessible to other users* | The file was downloaded, checked out of git, synced (e.g. Dropbox), restored from a backup, or copied off a USB stick | `chmod 600 <vault>` |
+| …and `chmod` has no effect | The vault is on a filesystem that ignores Unix permissions: FAT/exFAT, NTFS, a network share, or WSL's `/mnt/c` | Copy the vault to a local disk and use the copy with `--vault` |
+| *Vault directory … is writable by other users*, and the directory is yours | Your umask is `002` (the default on Fedora and RHEL), so directories you create are group-writable | `chmod go-w <directory>` |
+| *Vault directory … is writable by other users*, and it is `/tmp` or another shared directory | Anyone can create files there, so someone could swap the vault or plant a journal file that SQLite would merge into it | Move the vault: `mkdir -p -m 700 ~/vaults && mv <vault> ~/vaults/`, then use `--vault ~/vaults/<name>` |
+| *Vault … belongs to another user* | Usually created with `sudo`, so root owns it | If it is yours: `sudo chown "$(id -un)" <vault>` |
+
+Then run `sk2 verify` to confirm every entry decrypts.
+
+This check is not made on Windows, which has no equivalent permission model in sk2 (see [Security Model](#security-model)).
+
 ## Shell Completion
 
 sk2 can complete subcommands, flags, and **stored service names** on Tab. `sk2 completions <shell>` prints the script; where you put it depends on the shell.

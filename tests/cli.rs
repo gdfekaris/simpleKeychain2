@@ -39,6 +39,16 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
+        // Tests run in parallel, and two sharing a name would share a directory —
+        // one's cleanup deleting the other's vault mid-test. Catch that at the source.
+        static USED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let mut used = USED.lock().unwrap();
+        assert!(
+            !used.iter().any(|n| n == name),
+            "two tests use Scratch::new({name:?}); names must be unique"
+        );
+        used.push(name.to_string());
+        drop(used);
         let dir = std::env::temp_dir().join(format!("sk2-it-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
@@ -384,6 +394,87 @@ fn init_refuses_a_vault_file_other_users_can_access() {
     let meta = std::fs::metadata(&v).unwrap();
     assert_eq!(meta.len(), 0, "the file must not have been initialized");
     assert_eq!(meta.permissions().mode() & 0o777, 0o666);
+}
+
+/// The upgrade path for a vault S3 refuses: every fix the error offers is a
+/// permission change or a move, the vault is untouched by the refusal, and after
+/// the fix it opens with the same master password and every credential intact.
+/// The `chmod` commands are taken from the error text and run through a real
+/// shell, in a directory with a space in its name, so the quoting is tested too.
+#[test]
+fn a_refused_vault_opens_again_after_the_suggested_fix() {
+    use std::os::unix::fs::PermissionsExt;
+    let set_mode = |p: &std::path::Path, m| {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+    };
+    // The single command the error tells the user to run, as printed.
+    let suggested_fix = |out: &Outcome| -> String {
+        let mut lines = out.text.lines();
+        lines
+            .find(|l| l.contains("To fix:"))
+            .expect("no fix offered");
+        lines.next().expect("fix line").trim().to_string()
+    };
+    let run_in_shell = |cmd: &str| {
+        let ok = std::process::Command::new("sh")
+            .args(["-c", cmd])
+            .status()
+            .expect("run sh")
+            .success();
+        assert!(ok, "suggested fix failed: {cmd}");
+    };
+    let get_print = |v: &str| {
+        sk2(&["--vault", v, "get", "github", "--print"])
+            .answer("master password", MASTER)
+            .finish()
+            .assert_ok()
+            .assert_says("gh-pass-123");
+    };
+
+    let s = Scratch::new("refused-then-fixed");
+    let dir = s.0.join("my vaults");
+    std::fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o700);
+    let path = dir.join("vault.db");
+    let v = path.to_string_lossy().into_owned();
+    init_vault(&v);
+    add(&v, "github", "octocat", "gh-pass-123");
+    let before = std::fs::read(&path).unwrap();
+
+    // 1. A loose file mode — as left by a download, a sync client, or a restore.
+    set_mode(&path, 0o644);
+    let out = sk2(&["--vault", &v, "list"]).finish();
+    out.assert_failed()
+        .assert_says("has not been changed")
+        .assert_silent_about("Master password");
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "refusal touched the vault"
+    );
+    let fix = suggested_fix(&out);
+    assert!(fix.starts_with("chmod 600 '"), "path not quoted: {fix}");
+    run_in_shell(&fix);
+    get_print(&v);
+
+    // 2. A group-writable directory — what a umask of 002 gives a user's own
+    // directories on Fedora and RHEL.
+    set_mode(&dir, 0o775);
+    let out = sk2(&["--vault", &v, "list"]).finish();
+    out.assert_failed()
+        .assert_says("has not opened or changed anything")
+        .assert_silent_about("Master password");
+    let fix = suggested_fix(&out);
+    assert!(fix.starts_with("chmod go-w '"), "path not quoted: {fix}");
+    run_in_shell(&fix);
+    get_print(&v);
+
+    // 3. A move, the fix for a directory that is not the user's to tighten. The
+    // vault's encryption does not depend on its path.
+    let moved = s.path("moved.db");
+    std::fs::rename(&path, &moved).unwrap();
+    get_print(&moved);
+    verify(&moved, MASTER).assert_ok();
 }
 
 /// `edit` shows the stored username in brackets, which proves the value survived a

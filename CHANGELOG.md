@@ -34,10 +34,16 @@ backup compatibility — not to a Rust API.
   macOS sk2 now checks before opening a vault, as ssh does with its keys, and stops with an error if
   the file belongs to another user, if group or other has any access to it, or if its directory is
   writable by anyone else — which rules out keeping a vault directly in `/tmp`, where another user
-  could swap the file or plant a journal that SQLite would roll into it. Nothing is changed for you:
-  for a loose mode on your own file the error gives the `chmod 600` to run. A vault created by any
-  release of sk2 in its default location already passes. The docs no longer suggest `/tmp/…` paths
-  for scratch vaults or decrypted CSVs; they use `mktemp -d`.
+  could swap the file or plant a journal that SQLite would roll into it.
+
+  **Upgrading:** a vault that any release of sk2 created or opened in its default location
+  (`~/.sk2/vault.db`) already passes. One that was copied, downloaded, synced, restored, created with
+  `sudo`, or kept in a shared or group-writable directory may be refused. Nothing is lost and no
+  password needs re-entering: sk2 refuses before opening the file, every fix is a `chmod`, `chown` or
+  move of that one file, and each error message prints the exact command for its case. The README's
+  *If sk2 refuses to open your vault* section covers each case, including filesystems where `chmod`
+  has no effect. The docs no longer suggest `/tmp/…` paths for scratch vaults or decrypted CSVs; they
+  use `mktemp -d`.
 
 ### Documentation
 
