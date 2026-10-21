@@ -70,6 +70,16 @@ backup compatibility — not to a Rust API.
   or common patterns, so it overrates passwords like `Password1!`; treat a high score as a floor,
   not a guarantee.
 
+- **Strength estimates no longer overrate passwords with non-ASCII characters.** The estimate
+  counted bytes rather than characters, so each accented letter, CJK character or emoji counted two
+  to four times over: `日本語の` rated "Fair" instead of "Weak".
+
+- **A GPG backup whose file name starts with `-` is no longer read by `gpg` as an option.** sk2
+  passed the path to `gpg --decrypt` as-is, so a file named, say, `--output=x.gpg` changed gpg's own
+  settings instead of being decrypted. Reaching this took typing `sk2 import -- <name>`, since sk2's
+  own argument parsing already rejects such names; sk2 now ends gpg's options with `--` and passes
+  such a path as `./<name>`.
+
 ### Documentation
 
 - **`SECURITY.md` and `RELEASING.md` no longer overstate what release verification proves.** They

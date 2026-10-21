@@ -223,7 +223,9 @@ pub(crate) fn password_entropy(password: &str) -> f64 {
     if alphabet == 0 {
         return 0.0;
     }
-    password.len() as f64 * (alphabet as f64).log2()
+    // Characters, not bytes (S9): `len()` counts UTF-8 bytes, which credited each
+    // non-ASCII character two to four times over.
+    password.chars().count() as f64 * (alphabet as f64).log2()
 }
 
 pub(crate) fn encrypt_raw(key: &[u8; KEY_LEN], plaintext: &[u8]) -> (Vec<u8>, Vec<u8>) {
@@ -651,7 +653,7 @@ mod tests {
         assert_eq!(charset_bytes(&Charset::Dna).len(), 4);
     }
 
-    // -- password_entropy (3 tests) --
+    // -- password_entropy (4 tests) --
 
     #[test]
     fn entropy_empty() {
@@ -670,6 +672,17 @@ mod tests {
         let e = password_entropy("aA1!");
         let expected = 4.0 * 94_f64.log2();
         assert!((e - expected).abs() < 0.01);
+    }
+
+    /// Four characters score as four, however many bytes UTF-8 needs (S9).
+    /// `日本語の` is 12 bytes and used to rate "Fair" (60 bits) instead of ~20.
+    #[test]
+    fn entropy_counts_characters_not_bytes() {
+        let expected = 4.0 * 32_f64.log2();
+        assert!((password_entropy("日本語の") - expected).abs() < 0.01);
+        assert!((password_entropy("🔑🔑🔑🔑") - expected).abs() < 0.01);
+        let e = password_entropy("pässwörd");
+        assert!((e - 8.0 * 58_f64.log2()).abs() < 0.01, "got {e}");
     }
 
     // -- unicode (1 test) --

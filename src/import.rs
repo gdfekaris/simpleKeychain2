@@ -124,6 +124,18 @@ fn import_sk2b(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(),
     Ok(())
 }
 
+/// The file name as gpg must receive it (S8). Without `--`, a name starting with
+/// `-` is parsed as an option — `--output=x.gpg` really does set gpg's output.
+/// `--` alone is not enough for a name that is exactly `-`, which gpg still reads
+/// as stdin, so a relative path starting with `-` also gets `./`.
+fn gpg_file_arg(file: &str) -> String {
+    if file.starts_with('-') {
+        format!("./{file}")
+    } else {
+        file.to_string()
+    }
+}
+
 fn import_gpg(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(), String> {
     let gpg_check = process::Command::new("gpg")
         .arg("--version")
@@ -154,7 +166,8 @@ fn import_gpg(conn: &Connection, key: &[u8; KEY_LEN], file: &str) -> Result<(), 
     let output = process::Command::new("gpg")
         .arg("--decrypt")
         .arg("--quiet")
-        .arg(file)
+        .arg("--")
+        .arg(gpg_file_arg(file))
         .output()
         .map_err(|e| format!("Failed to start GPG: {e}"))?;
 
@@ -342,5 +355,18 @@ mod tests {
         let (records, skipped) = parse_gpg_csv(csv).unwrap();
         assert!(records.is_empty());
         assert_eq!(skipped, 0, "caller reports 'No credentials found'");
+    }
+
+    // -- gpg_file_arg (S8) --
+
+    #[test]
+    fn gpg_file_names_cannot_become_options() {
+        assert_eq!(gpg_file_arg("-"), "./-");
+        assert_eq!(gpg_file_arg("--output=x.gpg"), "./--output=x.gpg");
+        assert_eq!(gpg_file_arg("-weird.csv.gpg"), "./-weird.csv.gpg");
+        // Everything else is passed through untouched.
+        assert_eq!(gpg_file_arg("backup.csv.gpg"), "backup.csv.gpg");
+        assert_eq!(gpg_file_arg("/tmp/-x.gpg"), "/tmp/-x.gpg");
+        assert_eq!(gpg_file_arg("dir/-x.gpg"), "dir/-x.gpg");
     }
 }
