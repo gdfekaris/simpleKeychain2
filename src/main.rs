@@ -228,7 +228,9 @@ enum Command {
     },
     /// Print a shell completion script (see --help for installation)
     ///
-    /// Example: sk2 completions bash > ~/.bash_completion.d/sk2
+    /// Example, in ~/.bashrc: command -v sk2 >/dev/null && source <(sk2 completions bash)
+    ///
+    /// The README covers zsh, fish, PowerShell, and file-based installs.
     #[cfg(feature = "completion")]
     Completions {
         /// Which shell to emit a script for
@@ -405,6 +407,27 @@ fn check_generate_flags(
     Ok(())
 }
 
+/// Reject a service name that is empty or only whitespace.
+///
+/// Called before `unlock_vault` for the same reason as `check_generate_flags`. `import`
+/// already skips rows with an empty service; `add` and `rename` let one through, and a
+/// blank entry cannot be told apart in `list` or picked reliably by partial matching.
+fn check_service_name(service: &str) -> Result<(), String> {
+    if service.trim().is_empty() {
+        return Err("Service name cannot be empty.".into());
+    }
+    Ok(())
+}
+
+/// `--days` in seconds, saturating rather than overflowing.
+///
+/// A plain `days * 86400` panics in debug builds and wraps in release once `--days`
+/// is large enough, and a wrapped (negative) threshold would report every credential
+/// as stale. Saturating means an absurd `--days` simply matches nothing.
+fn stale_threshold_secs(days: u64) -> i64 {
+    i64::try_from(days.saturating_mul(86400)).unwrap_or(i64::MAX)
+}
+
 fn validated_generate(
     length: usize,
     charset: &crypto::Charset,
@@ -511,6 +534,7 @@ fn run(cli: Cli) -> Result<(), String> {
         } => {
             // Before unlock_vault: a bad flag combination should not cost the user a
             // master password entry and a username prompt first (F7b).
+            check_service_name(&service)?;
             check_generate_flags(generate, length, &charset)?;
 
             let key = vault::unlock_vault(&conn)?;
@@ -674,7 +698,7 @@ fn run(cli: Cli) -> Result<(), String> {
                         .duration_since(std::time::UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs() as i64;
-                    let threshold = (days * 86400) as i64;
+                    let threshold = stale_threshold_secs(days);
                     let stale_entries: Vec<_> = entries
                         .iter()
                         .filter(|(_, ts)| ts.is_none_or(|t| now - t >= threshold))
@@ -819,6 +843,7 @@ fn run(cli: Cli) -> Result<(), String> {
             old_service,
             new_service,
         } => {
+            check_service_name(&new_service)?;
             let key = vault::unlock_vault(&conn)?;
             let old_service = resolve_service(&conn, &old_service)?;
             db::rename_credential(&conn, &key, &old_service, &new_service)?;
@@ -970,6 +995,40 @@ mod tests {
         assert!(
             check_generate_flags(true, DEFAULT_PASSWORD_LENGTH, &crypto::Charset::Default).is_ok()
         );
+    }
+
+    // -- check_service_name --
+
+    #[test]
+    fn empty_or_blank_service_name_is_rejected() {
+        for name in ["", " ", "\t \n"] {
+            let err = check_service_name(name).unwrap_err();
+            assert_eq!(err, "Service name cannot be empty.", "for {name:?}");
+        }
+    }
+
+    #[test]
+    fn ordinary_service_names_are_accepted() {
+        for name in ["github", "my bank", " padded ", "日本語"] {
+            assert!(check_service_name(name).is_ok(), "for {name:?}");
+        }
+    }
+
+    // -- stale_threshold_secs --
+
+    #[test]
+    fn stale_threshold_is_days_in_seconds() {
+        assert_eq!(stale_threshold_secs(0), 0);
+        assert_eq!(stale_threshold_secs(90), 90 * 86400);
+    }
+
+    /// `days * 86400` used to panic in debug and wrap negative in release, which would
+    /// have listed every credential as stale.
+    #[test]
+    fn huge_stale_threshold_saturates_instead_of_overflowing() {
+        assert_eq!(stale_threshold_secs(u64::MAX), i64::MAX);
+        // Past i64 seconds but not past u64: must not wrap negative.
+        assert_eq!(stale_threshold_secs(i64::MAX as u64 / 86400 + 1), i64::MAX);
     }
 
     // -- resolve_export_format / default_output_for (F7d) --

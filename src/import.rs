@@ -13,7 +13,7 @@ use crate::vault;
 /// and the number skipped.
 ///
 /// Parsing is whole-text via `backup::parse_csv_records` rather than line-scoped:
-/// `export::csv_escape` quotes fields but cannot escape newlines, so a note
+/// `backup::csv_escape` quotes fields but cannot escape newlines, so a note
 /// containing `\n` is written as a real newline inside a quoted field. Splitting on
 /// lines before parsing tore such a record into fragments that each failed to parse,
 /// silently dropping the whole credential.
@@ -56,7 +56,8 @@ fn parse_gpg_csv(csv: &str) -> Result<(Vec<Vec<String>>, usize), String> {
             continue;
         }
 
-        if fields[0].is_empty() {
+        // Whitespace-only counts as empty, matching `main::check_service_name`.
+        if fields[0].trim().is_empty() {
             ui::warning(&format!("Row {row_num}: empty service name, skipping."));
             skipped += 1;
             continue;
@@ -293,6 +294,16 @@ mod tests {
         let csv = "name,username,password\n\"\",user,pass\nsvc,user,pass\n";
         let (records, skipped) = parse_gpg_csv(csv).unwrap();
         assert_eq!(records.len(), 1);
+        assert_eq!(skipped, 1);
+    }
+
+    /// Same rule as `add` and `rename`: a name that is only whitespace is empty.
+    #[test]
+    fn whitespace_only_service_skipped() {
+        let csv = "name,username,password\n\"   \",user,pass\nsvc,user,pass\n";
+        let (records, skipped) = parse_gpg_csv(csv).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0][0], "svc");
         assert_eq!(skipped, 1);
     }
 

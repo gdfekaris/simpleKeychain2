@@ -190,7 +190,8 @@ pub(crate) fn import_vault(
             let notes = fields.get(3).map(|s| s.as_str()).unwrap_or("");
             let url = fields.get(4).map(|s| s.as_str()).unwrap_or("");
 
-            if service.is_empty() {
+            // Whitespace-only counts as empty, matching `main::check_service_name`.
+            if service.trim().is_empty() {
                 continue;
             }
 
@@ -507,6 +508,32 @@ mod tests {
             "notes should default to empty for 3-column rows"
         );
         assert_eq!(url, "", "url should default to empty for 3-column rows");
+    }
+
+    /// A whitespace-only service name is skipped like an empty one, matching `add`
+    /// and `rename`, rather than landing as an entry nobody can see in `list`.
+    #[test]
+    fn m14_import_skips_whitespace_only_service() {
+        let csv = "name,username,password,notes,url\n\
+                   \"   \",ghost_user,ghost_pass,,\n\
+                   real_svc,user,pass,,\n";
+
+        let mut salt = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt);
+        let backup_key = crypto::derive_key("bp", &salt, crypto::KdfParams::SK2B_V1);
+        let (nonce, ciphertext) = crypto::encrypt_raw(&backup_key, csv.as_bytes());
+
+        let mut blob = Vec::with_capacity(HEADER_LEN + ciphertext.len());
+        blob.extend_from_slice(&BACKUP_MAGIC);
+        blob.push(BACKUP_VERSION);
+        blob.extend_from_slice(&salt);
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ciphertext);
+
+        let target = setup();
+        let count = import_vault(&target, &TEST_KEY, &blob, "bp").unwrap();
+        assert_eq!(count, 1, "only the real row counts");
+        assert_eq!(db::list_services(&target), vec!["real_svc"]);
     }
 
     #[test]

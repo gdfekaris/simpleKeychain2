@@ -42,6 +42,22 @@ backup compatibility — not to a Rust API.
   dot-source that file once, so refreshing means rewriting one file. The PowerShell script itself
   remains unexecuted and unverified, as documented.
 
+- **`sk2 completions --help` still showed the broken bash path.** The fix above corrected the README
+  and the script header but missed the help text, which is generated from a doc comment in
+  `main.rs` and still said `sk2 completions bash > ~/.bash_completion.d/sk2`. It now shows the same
+  guarded line the README leads with and points to the README for the other shells.
+
+- **`sk2 list --stale --days <very large number>` no longer overflows.** Converting days to seconds
+  could overflow: a debug build panicked, and a release build wrapped to a negative threshold that
+  listed every credential as stale. The conversion now saturates, so an absurdly large `--days`
+  matches nothing.
+
+- **`add` and `rename` reject an empty or whitespace-only service name.** Both accepted one, which
+  created an entry that is invisible in `list` and cannot be reliably picked by partial matching.
+  The check runs before the master password prompt, like the existing flag checks, so the mistake
+  costs nothing to correct. Both importers already skipped rows with an empty service name, and now
+  skip whitespace-only ones too, so the rule is the same on every path that creates an entry.
+
 ### Changed
 
 - **Completion install instructions now lead with the forms that survive an sk2 upgrade.** An
