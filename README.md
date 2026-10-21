@@ -224,7 +224,7 @@ On a headless server, or in an SSH session without forwarding, there is no clipb
 sk2 get github --print
 ```
 
-`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. The trade: printed output has no 10-second clear. It stays in your terminal scrollback and any session logs until you clear them, so prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead. `--print` cannot be combined with `--notes`. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
+`--print` writes the bare password (and nothing else) to stdout, prints a warning to stderr, and skips the clipboard entirely, so `PASS=$(sk2 get github --print)` captures exactly the secret. The trade: printed output has no 10-second clear. It stays in your terminal scrollback and any session logs until you clear them, so prefer the clipboard when you have one. Combined with `--username`, `--print` outputs the username instead; combined with `--notes`, it outputs the notes — the only way to read them on a machine with no clipboard — with the same warning as for a password. `--print` writes one value per call, so it takes `--username` or `--notes`, not both. The master password prompt still requires a real terminal, so `get` remains interactive even with `--print`.
 
 If no exact match is found, sk2 falls back to a case-insensitive substring search. A single match is used automatically; multiple matches are shown as a numbered list to pick from.
 

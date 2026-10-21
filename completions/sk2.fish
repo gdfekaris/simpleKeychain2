@@ -80,7 +80,7 @@ complete -c sk2 -l vault -r -F -d 'Path to the vault database file'
 # Per-command flags
 complete -c sk2 -n '__fish_seen_subcommand_from get' -l username -d 'Copy the username instead'
 complete -c sk2 -n '__fish_seen_subcommand_from get' -l print    -d 'Print to stdout instead of copying'
-complete -c sk2 -n '__fish_seen_subcommand_from get' -l notes    -d 'Also show the notes'
+complete -c sk2 -n '__fish_seen_subcommand_from get' -l notes    -d 'Show the notes (with --print, print them)'
 
 complete -c sk2 -n '__fish_seen_subcommand_from edit' -l username -d 'Edit only the username'
 complete -c sk2 -n '__fish_seen_subcommand_from edit' -l password -d 'Edit only the password'

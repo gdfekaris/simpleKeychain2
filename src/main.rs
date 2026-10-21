@@ -70,6 +70,15 @@ fn vault_path(cli_override: Option<&str>) -> std::path::PathBuf {
     path
 }
 
+/// `get --print` writes exactly one bare value, so it must be told which one.
+/// Called before `unlock_vault`, so a contradictory command costs no password entry.
+fn check_print_selection(print: bool, username: bool, notes: bool) -> Result<(), String> {
+    if print && username && notes {
+        return Err("--print outputs one value: pass --username or --notes, not both.".into());
+    }
+    Ok(())
+}
+
 /// How `get` treats a credential's notes (S4).
 #[cfg_attr(test, derive(Debug, PartialEq))]
 enum NotesDisplay<'a> {
@@ -382,8 +391,9 @@ enum Command {
         #[arg(long)]
         print: bool,
         /// Also show the notes, which are hidden by default because they often
-        /// hold recovery codes or security answers
-        #[arg(long, conflicts_with = "print")]
+        /// hold recovery codes or security answers. With --print, print the notes
+        /// instead of the password
+        #[arg(long)]
         notes: bool,
     },
     /// Delete a credential by service name
@@ -779,6 +789,7 @@ fn run(cli: Cli) -> Result<(), String> {
             print,
             notes: show_notes,
         } => {
+            check_print_selection(print, copy_username, show_notes)?;
             let key = vault::unlock_vault(&conn)?;
             let service = resolve_service(&conn, &service)?;
             match db::get_credential(&conn, &key, &service)? {
@@ -788,14 +799,23 @@ fn run(cli: Cli) -> Result<(), String> {
                         // to stdout and *nothing else does*, so command substitution
                         // captures it cleanly; the clipboard is skipped entirely rather
                         // than exposing the secret through two channels at once.
-                        if !copy_username {
-                            ui::print_warning();
-                        }
-                        ui::raw_line(if copy_username {
-                            username.as_str()
+                        //
+                        // `--notes` is the one way to read notes without a clipboard,
+                        // so it is a value --print can select, warned about like the
+                        // password. The username is not warned about: a normal `get`
+                        // displays it anyway.
+                        if show_notes {
+                            if notes.is_empty() {
+                                return Err(format!("No notes stored for '{service}'."));
+                            }
+                            ui::print_warning("stored notes");
+                            ui::raw_line(notes.as_str());
+                        } else if copy_username {
+                            ui::raw_line(username.as_str());
                         } else {
-                            password.as_str()
-                        });
+                            ui::print_warning("a stored password");
+                            ui::raw_line(password.as_str());
+                        }
                         return Ok(());
                     }
                     let clipboard_text: &str = if copy_username {
@@ -1499,14 +1519,17 @@ mod tests {
         assert_eq!(notes_display("", true), NotesDisplay::Absent);
     }
 
-    /// `--print` emits exactly one bare value; notes are not one of its choices.
+    /// `--print` emits exactly one bare value: the password, the username, or the
+    /// notes — never two. Outside `--print`, `--username --notes` is fine (copy the
+    /// username, show the notes).
     #[test]
-    fn get_notes_conflicts_with_print() {
-        assert!(Cli::try_parse_from(["sk2", "get", "svc", "--notes"]).is_ok());
-        assert!(Cli::try_parse_from(["sk2", "get", "svc", "--notes", "--username"]).is_ok());
-        let err = Cli::try_parse_from(["sk2", "get", "svc", "--notes", "--print"])
-            .err()
-            .expect("conflict");
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    fn print_selects_exactly_one_value() {
+        assert!(check_print_selection(true, false, false).is_ok());
+        assert!(check_print_selection(true, true, false).is_ok());
+        assert!(check_print_selection(true, false, true).is_ok());
+        assert!(check_print_selection(false, true, true).is_ok());
+        let err = check_print_selection(true, true, true).unwrap_err();
+        assert!(err.contains("not both"), "got: {err}");
+        assert!(Cli::try_parse_from(["sk2", "get", "svc", "--notes", "--print"]).is_ok());
     }
 }

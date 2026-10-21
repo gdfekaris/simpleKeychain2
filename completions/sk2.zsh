@@ -63,8 +63,8 @@ _sk2() {
                 get)
                     _arguments \
                         '--username[copy the username instead of the password]' \
-                        '(--notes)--print[print the value to stdout instead of copying it]' \
-                        '(--print)--notes[also show the notes]' \
+                        '--print[print the value to stdout instead of copying it]' \
+                        '--notes[show the notes (with --print, print them instead)]' \
                         '1:service:_sk2_services'
                     ;;
                 delete)

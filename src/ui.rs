@@ -171,9 +171,10 @@ pub(crate) fn password_strength(entropy: f64) {
 }
 
 /// Sterner than `generate_warning`: this is a *stored* credential, not a throwaway.
-pub(crate) fn print_warning() {
+/// `what` names the secret: "a stored password" or "stored notes".
+pub(crate) fn print_warning(what: &str) {
     eprintln!(
-        "{} Printing a stored password. It will remain in terminal scrollback and any session logs — clear or close this terminal when you are done.",
+        "{} Printing {what}. It will remain in terminal scrollback and any session logs — clear or close this terminal when you are done.",
         "[!]".yellow().bold(),
     );
 }

@@ -59,8 +59,16 @@ backup compatibility — not to a Rust API.
   memory after use — yet `get` printed them on every call, into terminal scrollback, session logs and
   screen shares. They are now hidden by default, and a credential that has notes says so
   (`Notes: hidden (run with --notes to show)`), so nothing appears to have gone missing. Nothing
-  stored changes. `--notes` cannot be combined with `--print`. Shell completion offers the new flag
-  in fish, zsh and PowerShell.
+  stored changes. Shell completion offers the new flag in fish, zsh and PowerShell.
+
+### Added
+
+- **`sk2 get <service> --print --notes` prints a credential's notes.** On a machine with no
+  clipboard — a server, or SSH without forwarding — `get` stops at the clipboard step before showing
+  anything, so notes could not be read there at all. With `--print --notes` they go to stdout, bare,
+  with the same warning as a printed password. `--print` still outputs one value per call, so it
+  takes `--username` or `--notes`, not both; that combination is refused before the master password
+  is asked for.
 
 ### Fixed
 

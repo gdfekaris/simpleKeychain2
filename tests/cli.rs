@@ -543,6 +543,56 @@ fn a_waiting_sk2_cannot_be_read_by_other_processes() {
         .assert_says("Vault initialized");
 }
 
+/// `get --print --notes` is the only way to read notes without a clipboard — the
+/// headless case `--print` exists for — so it is tested here, where the plain
+/// `get` display cannot be. The notes come out bare on stdout with the stern
+/// warning; the password does not appear; asking for two values at once is refused
+/// before the master password prompt.
+#[test]
+fn get_print_notes_displays_the_notes() {
+    let s = Scratch::new("printnotes");
+    let v = s.vault();
+    init_vault(&v);
+    sk2(&["--vault", &v, "add", "bank", "--notes"])
+        .answer("master password", MASTER)
+        .answer("username", "me\n")
+        .answer("password", "bank-pass-123\n")
+        .answer("notes", "recovery: 1111-2222\n")
+        .finish()
+        .assert_ok();
+    add(&v, "plain", "me", "plain-pass-123");
+
+    sk2(&["--vault", &v, "get", "bank", "--print", "--notes"])
+        .answer("master password", MASTER)
+        .finish()
+        .assert_ok()
+        .assert_says("recovery: 1111-2222")
+        .assert_says("Printing stored notes")
+        .assert_silent_about("bank-pass-123")
+        .assert_silent_about("copied to clipboard");
+
+    sk2(&["--vault", &v, "get", "plain", "--print", "--notes"])
+        .answer("master password", MASTER)
+        .finish()
+        .assert_failed()
+        .assert_says("No notes stored for 'plain'")
+        .assert_silent_about("plain-pass-123");
+
+    sk2(&[
+        "--vault",
+        &v,
+        "get",
+        "bank",
+        "--print",
+        "--notes",
+        "--username",
+    ])
+    .finish()
+    .assert_failed()
+    .assert_says("not both")
+    .assert_silent_about("Master password");
+}
+
 /// `edit` shows the stored username in brackets, which proves the value survived a
 /// full encrypt/store/decrypt cycle without needing the clipboard.
 #[test]
