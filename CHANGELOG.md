@@ -52,7 +52,25 @@ backup compatibility — not to a Rust API.
   zero, which also covers macOS and the `gpg` processes sk2 starts. Root can still read any
   process's memory, and a system crash reporter may keep a root-only dump; see `SECURITY.md`.
 
+- **The bundled SQLite is updated to 3.54.1, fixing CVE-2026-119375** (RUSTSEC-2026-0459). Earlier
+  SQLite versions could return stale bytes of the process's own memory when opening a database
+  together with a crafted `-wal` file beside it. Someone would have had to be able to write files
+  next to your vault, or hand you a vault to open — on Linux and macOS the directory check above
+  already rules out the first, but Windows has no such check, and no released version has it yet.
+  This came with `rusqlite` 0.39 → 0.41. **Your vault file is not affected:** its format is
+  unchanged, a vault from any earlier release opens as before, and v1.3.1 can still open a vault
+  this version has written (both directions tested).
+
 ### Changed
+
+- **Building from source now requires Rust 1.89** (was 1.88), the minimum `rusqlite` 0.41 declares.
+  The released binaries are unaffected. With an older toolchain cargo stops immediately with
+  "requires rustc 1.89"; `rustup update stable` fixes it.
+
+- **Two indirect dependencies were updated to clear advisories that did not affect sk2:** `rustix`
+  1.1.3 → 1.1.6 (RUSTSEC-2026-0486, unsound extended-attribute functions that nothing in sk2's
+  dependency tree calls; Linux clipboard support only) and `clipboard-win` 5.4.1 → 5.4.3 (the
+  former was yanked from crates.io; Windows clipboard support only).
 
 - **`sk2 get` no longer shows notes unless you pass `--notes`.** Notes are treated as secret
   everywhere else in sk2 — typed at a hidden prompt rather than on the command line, wiped from

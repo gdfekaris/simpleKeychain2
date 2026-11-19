@@ -44,7 +44,7 @@ Expect two platform warnings, because sk2's binaries are not enrolled in the pai
 
 ### Option 2 — build from source
 
-Requires [Rust](https://www.rust-lang.org/tools/install) **1.88 or newer**, plus a C compiler for the bundled SQLite — on Linux install your distro's build tools (e.g. `sudo apt install build-essential`), on macOS the Xcode Command Line Tools (`xcode-select --install`).
+Requires [Rust](https://www.rust-lang.org/tools/install) **1.89 or newer**, plus a C compiler for the bundled SQLite — on Linux install your distro's build tools (e.g. `sudo apt install build-essential`), on macOS the Xcode Command Line Tools (`xcode-select --install`).
 
 **Prefer a verified source tarball where the release offers one.** Releases that ship `sk2-X.Y.Z-src.tar.gz` list it in `SHA256SUMS`, so it verifies against the maintainer's minisign signature exactly like the binaries do — see [SECURITY.md](SECURITY.md#verifying-downloads). A `git clone` is authenticated by nothing but TLS to GitHub. Releases up to and including v1.3.0 ship none.
 
