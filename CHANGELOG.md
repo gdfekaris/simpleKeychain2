@@ -9,6 +9,18 @@ backup compatibility — not to a Rust API.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-11-18
+
+**Upgrading from 1.3.x — three things behave differently.** Your vault file and its format are
+unchanged, and nothing needs re-entering.
+
+- **sk2 may refuse to open a vault it opened before**, if the file or its directory is accessible
+  to other users. A vault in the default location is not affected. The error prints the exact
+  command that fixes it; see *sk2 refuses a vault other users could read or replace* below and the
+  README's *If sk2 refuses to open your vault*.
+- **`sk2 get` hides notes unless you pass `--notes`.** They are still there.
+- **Building from source needs Rust 1.89.** The released binaries are unaffected.
+
 ### Security
 
 - **The release build job no longer holds write access.** `release.yml` granted `contents: write`,
@@ -467,7 +479,8 @@ from the master password with Argon2id.
 If you are still on this version, prefer 1.2.0: 1.0.0 predates the file-permission hardening, the
 SK2B backup format, and the GPG import fix described above.
 
-[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.1...main
+[Unreleased]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.4.0...main
+[1.4.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/gdfekaris/simpleKeychain2/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/gdfekaris/simpleKeychain2/releases/tag/v1.2.0

@@ -37,9 +37,10 @@ There is no bug bounty.
 
 | Version | Supported |
 |---|---|
-| 1.3.x | Yes |
-| 1.2.x | No — upgrade to 1.3.x |
-| 1.1.x | No — never released; upgrade to 1.3.x |
+| 1.4.x | Yes |
+| 1.3.x | No — upgrade to 1.4.x |
+| 1.2.x | No — upgrade to 1.4.x |
+| 1.1.x | No — never released; upgrade to 1.4.x |
 | 1.0.x | No — predates the file-permission hardening and a data-loss fix in GPG import |
 
 Only the latest release receives fixes. There is no long-term-support line.
@@ -88,7 +89,7 @@ These are deliberate trade-offs or accepted gaps, documented so you can judge th
 
 - **Deleting an entry removes it from the vault file, not necessarily from the disk.** sk2 zeroes
   freed space inside `vault.db`. Releases up to and including v1.3.1 did not, and left deleted
-  entries' ciphertext in the file; a later release clears those remnants once, on first open. Copy-on-write filesystems, SSD wear-levelling, backups, and snapshots of the file can
+  entries' ciphertext in the file; v1.4.0 and later clear those remnants once, on first open. Copy-on-write filesystems, SSD wear-levelling, backups, and snapshots of the file can
   still hold earlier versions, which are decryptable with the master password that was current
   when they were written. If an old master password may be compromised, treat old copies of the
   vault as compromised too.
@@ -191,7 +192,7 @@ Without one, the command exits non-zero and prints a login prompt rather than a 
 failure; that is a missing credential, not a bad artifact.
 
 ```bash
-gh attestation verify sk2-1.3.1-x86_64-unknown-linux-musl.tar.gz \
+gh attestation verify sk2-1.4.0-x86_64-unknown-linux-musl.tar.gz \
     --repo gdfekaris/simpleKeychain2
 ```
 
